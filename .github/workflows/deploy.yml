@@ -39,7 +39,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Detect repo basePath
+       -name: Detect repo basePath
         id: pages
         run: |
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
@@ -48,6 +48,7 @@ jobs:
             echo "base_path=" >> $GITHUB_OUTPUT
           else
             echo "base_path=" >> $GITHUB_OUTPUT
+          fi
 
 
 

@@ -39,18 +39,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-       -name: Detect repo basePath
+      - name: Detect repo basePath
         id: pages
         run: |
-          REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          OWNER_NAME="${GITHUB_REPOSITORY%/*}"
-          if [ "$REPO_NAME" = "${OWNER_NAME}.github.io" ]; then
-            echo "base_path=" >> $GITHUB_OUTPUT
-          else
-            echo "base_path=" >> $GITHUB_OUTPUT
-          fi
-
-
+          echo "base_path=" >> $GITHUB_OUTPUT
 
       - name: Build static site
         env:
@@ -83,4 +75,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-

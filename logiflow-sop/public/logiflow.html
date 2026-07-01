@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LogiFlow SOP - 物流标准作业程序智能平台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Inter', system-ui, sans-serif; }
+  .flow-node { transition: transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s cubic-bezier(.4,0,.2,1), border-color .2s ease; }
+  .flow-node:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(15,23,42,.08), 0 8px 10px -6px rgba(15,23,42,.06); }
+  @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(59,130,246,.55);} 70% { box-shadow: 0 0 0 12px rgba(59,130,246,0);} 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0);} }
+  .agent-pulse { animation: pulse-ring 2.2s cubic-bezier(.215,.61,.355,1) infinite; }
+  @keyframes typing-blink { 0%,80%,100% { opacity:.25; transform: translateY(0);} 40% { opacity:1; transform: translateY(-2px);} }
+  .typing-dot { animation: typing-blink 1.2s infinite ease-in-out; display:inline-block; width:6px; height:6px; background:#94a3b8; border-radius:9999px; }
+  .typing-dot:nth-child(2) { animation-delay: .15s; }
+  .typing-dot:nth-child(3) { animation-delay: .3s; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+  .line-clamp-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  textarea, input { font-family: inherit; }
+  [contenteditable] { outline: none; }
+  .agent-panel { transform: translateY(120%); transition: transform .3s cubic-bezier(.4,0,.2,1); }
+  .agent-panel.open { transform: translateY(0); }
+  .cursor-blink::after { content:'▍'; color:#64748b; animation: blink 1s infinite; margin-left: 2px; }
+  @keyframes blink { 0%,50% { opacity: 1;} 51%,100% { opacity: 0;} }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800 h-screen overflow-hidden">
+
+<!-- Header -->
+<header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 z-30 relative shadow-sm">
+  <div class="flex items-center gap-3">
+    <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-md shadow-blue-200">L</div>
+    <div>
+      <h1 class="font-bold text-base text-slate-900 leading-tight">LogiFlow SOP</h1>
+      <p class="text-xs text-slate-500 leading-tight">物流标准作业程序智能平台</p>
+    </div>
+  </div>
+  <div class="flex items-center gap-3">
+    <div class="hidden md:flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1.5 text-xs">
+      <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+      <span class="text-slate-500">当前项目：</span>
+      <span class="font-medium text-slate-900 max-w-[180px] truncate" id="currentProject">—</span>
+    </div>
+    <button onclick="app.exportSOP()" class="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 transition flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+      导出网页
+    </button>
+  </div>
+</header>
+
+<div class="flex h-[calc(100vh-64px)]">
+  <!-- Sidebar -->
+  <aside class="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-hidden">
+    <div class="p-4 overflow-y-auto flex-1">
+      <button onclick="app.createNewSOP()" class="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center justify-center gap-1.5 mb-4">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        新建 SOP 流程
+      </button>
+      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">我的 SOP 库</div>
+      <nav class="space-y-1 mb-6" id="sopNav"></nav>
+      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">模板市场</div>
+      <div class="space-y-2" id="templateList"></div>
+    </div>
+    <div class="mt-auto p-4 border-t border-slate-200 shrink-0">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-xs font-bold">AI</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium text-slate-700">SOP 智能助手</div>
+          <div class="text-xs text-slate-500" id="agentHint">点击右下角悬浮按钮唤起</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main canvas -->
+  <main class="flex-1 flex flex-col bg-slate-50 overflow-hidden min-w-0">
+    <div class="h-14 bg-white border-b border-slate-200 flex items-center px-6 justify-between shrink-0">
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-500">流程类型：</span>
+          <select id="processType" onchange="app.updateMeta('type', this.value)" class="text-sm border border-slate-300 rounded-lg px-2 py-1 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+            <option value="inbound">入库流程</option>
+            <option value="outbound">出库流程</option>
+            <option value="internal">库内作业</option>
+            <option value="transport">运输配送</option>
+            <option value="exception">异常处理</option>
+          </select>
+        </div>
+        <div class="h-6 w-px bg-slate-200"></div>
+        <button onclick="app.addStep('action')" class="px-3 py-1.5 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+          添加步骤
+        </button>
+        <button onclick="app.addStep('decision')" class="px-3 py-1.5 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          添加判断
+        </button>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="app.deleteCurrentSOP()" class="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          删除 SOP
+        </button>
+        <button onclick="app.saveSOP()" class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+          保存
+        </button>
+      </div>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-8" id="canvasArea">
+      <div class="max-w-3xl mx-auto">
+        <!-- SOP meta -->
+        <div class="bg-white rounded-xl border border-slate-200 p-6 mb-6 shadow-sm">
+          <div class="flex items-start justify-between gap-4 mb-4">
+            <div class="flex-1 min-w-0">
+              <input id="sopTitle" oninput="app.updateMeta('title', this.value)" class="text-2xl font-bold text-slate-900 w-full border-none focus:ring-0 p-0 bg-transparent" placeholder="输入 SOP 标题…" />
+              <textarea id="sopDesc" oninput="app.updateMeta('desc', this.value)" rows="2" class="w-full mt-2 text-sm text-slate-600 border-none focus:ring-0 p-0 resize-none bg-transparent" placeholder="输入 SOP 描述…"></textarea>
+            </div>
+            <div class="flex flex-col gap-2 items-end shrink-0">
+              <span class="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-medium" id="sopStatus">已启用</span>
+              <span class="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium" id="sopVersion">V1.0</span>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-100">
+            <div>
+              <div class="text-xs text-slate-500 mb-1">负责人</div>
+              <input id="sopOwner" oninput="app.updateMeta('owner', this.value)" class="text-sm font-medium text-slate-700 w-full border-none focus:ring-0 p-0 bg-transparent" />
+            </div>
+            <div>
+              <div class="text-xs text-slate-500 mb-1">预计耗时</div>
+              <input id="sopDuration" oninput="app.updateMeta('duration', this.value)" class="text-sm font-medium text-slate-700 w-full border-none focus:ring-0 p-0 bg-transparent" />
+            </div>
+            <div>
+              <div class="text-xs text-slate-500 mb-1">适用场景</div>
+              <input id="sopScenario" oninput="app.updateMeta('scenario', this.value)" class="text-sm font-medium text-slate-700 w-full border-none focus:ring-0 p-0 bg-transparent" />
+            </div>
+            <div>
+              <div class="text-xs text-slate-500 mb-1">更新日期</div>
+              <div class="text-sm font-medium text-slate-700" id="sopUpdatedAt">—</div>
+            </div>
+          </div>
+        </div>
+        <!-- Flow -->
+        <div id="flowContainer" class="space-y-6 relative pb-10"></div>
+        <div class="flex justify-center pt-2">
+          <button onclick="app.addStep('action')" class="group flex items-center gap-2 px-6 py-3 bg-white border-2 border-dashed border-slate-300 rounded-xl hover:border-blue-400 hover:bg-blue-50/40 transition">
+            <svg class="w-5 h-5 text-slate-400 group-hover:text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+            <span class="text-sm font-medium text-slate-500 group-hover:text-blue-600">添加新步骤</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Property Panel -->
+  <aside class="w-80 bg-white border-l border-slate-200 flex flex-col overflow-hidden shrink-0">
+    <div class="p-4 border-b border-slate-200 bg-slate-50/60 shrink-0">
+      <h3 class="font-semibold text-slate-900 text-sm">步骤详情</h3>
+      <p class="text-xs text-slate-500 mt-0.5" id="panelSub">点击左侧步骤进行编辑</p>
+    </div>
+    <div class="flex-1 overflow-y-auto p-4" id="propertyContent">
+      <div class="text-center text-slate-400 py-12">
+        <svg class="w-10 h-10 mx-auto mb-3 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <p class="text-sm">点击流程中的步骤<br/>查看和编辑详细信息</p>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- AI Agent floating -->
+<button id="agentTrigger" onclick="app.toggleAgent(true)" class="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-full shadow-lg shadow-blue-300/40 hover:shadow-xl hover:scale-105 transition flex items-center justify-center z-40 agent-pulse" aria-label="打开 AI 助手">
+  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+</button>
+
+<div id="agentWindow" class="agent-panel fixed bottom-6 right-6 w-[380px] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 z-40 flex flex-col overflow-hidden" style="height:540px;">
+  <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 flex items-center justify-between shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+      </div>
+      <div>
+        <h4 class="text-white font-semibold text-sm">LogiAgent</h4>
+        <p class="text-blue-100 text-xs">物流 SOP 智能助手</p>
+      </div>
+    </div>
+    <button onclick="app.toggleAgent(false)" class="text-white/80 hover:text-white transition" aria-label="关闭"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+  </div>
+  <div id="agentChat" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50"></div>
+  <div class="p-3 bg-white border-t border-slate-200 shrink-0">
+    <div class="flex gap-2 mb-2 overflow-x-auto scrollbar-none" id="quickPrompts"></div>
+    <div class="flex gap-2">
+      <input id="agentInput" type="text" placeholder="输入问题或指令…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();app.sendAgentMessage();}" class="flex-1 px-4 py-2 bg-slate-100 border-0 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+      <button id="agentSendBtn" onclick="app.sendAgentMessage()" class="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition disabled:opacity-50">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== LogiFlow SOP 单文件版（功能与 Web 版一致，AI 调云端流式接口）===== */
+const API_BASE = 'https://c8b55586-ad1f-491a-a034-93650f80e934.dev.coze.site';
+const STORAGE_KEY = 'logiflow_sops_v1';
+const ACTIVE_KEY = 'logiflow_active_sop_v1';
+const TODAY = new Date().toISOString().slice(0, 10);
+
+function uid(){ return 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function escapeHTML(s){ return (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+const DEFAULT_SOPS = [
+  {
+    id: 'sop-inbound-default',
+    code: 'SOP-IB-001',
+    name: '标准入库流程 SOP',
+    title: '标准入库流程 SOP',
+    description: '适用于普货入库、含质检、上架、信息系统录入全流程',
+    type: 'inbound',
+    status: 'active',
+    version: 'V1.0',
+    owner: '仓储部 · 李梦',
+    duration: '约 90 分钟 / 单',
+    scenario: '普货 / 单 SKU',
+    updatedAt: TODAY,
+    steps: [
+      { id: uid(), kind: 'action', title: '到货预约确认', description: '司机抵达前 2 小时通过 WMS 系统提交到货预约，确认 SKU、数量、车型、月台。', role: '司机 / 调度', duration: '5min', tools: ['WMS','钉钉'], risks: '未预约直接到货 → 拒收并通知供应商', controls: '系统自动校验：未预约车辆禁止进入园区', checklist: ['到货时间在预约窗口内','车型与申报一致','单据齐全'] },
+      { id: uid(), kind: 'action', title: '车辆入园 & 月台对接', description: '安保确认信息后引导车辆至指定月台，司机配合卸货。', role: '安保 / 月台员', duration: '10min', tools: ['门禁系统'], risks: '错月台导致后续作业拥堵', controls: '系统自动分配并广播月台号', checklist: ['车辆停稳','轮挡到位','签到完成'] },
+      { id: uid(), kind: 'decision', title: '货物外观质检', description: '收货员对外箱进行 100% 目视检查，发现破损 / 受潮立即停止。', role: '收货员', duration: '15min', condition: '外观是否合格', yesNext: 4, noNext: 'exception', checklist: ['外箱完好','无明显受潮','封条未破坏'] },
+      { id: uid(), kind: 'action', title: '清点 & 系统入账', description: '按 SKU 维度清点件数，扫码录入 WMS，差异需复核。', role: '收货员 / 复核员', duration: '30min', tools: ['PDA','WMS','电子秤'], risks: 'SKU 串混 / 数量不符', controls: '双人核对 + 复盘抽查 10%', checklist: ['SKU 与 PO 一致','件数 100% 复核','差异已上报'] },
+      { id: uid(), kind: 'action', title: '上架 & 入库完成', description: '系统按策略生成上架任务，叉车工按推荐库位上架。', role: '叉车工 / 仓管员', duration: '30min', tools: ['WMS','叉车','库位标签'], risks: '错上架导致后续拣货错误', controls: '扫码绑定库位，扫错强制重扫', checklist: ['库位扫码确认','货物摆放规范','系统状态为已入库'] }
+    ]
+  },
+  {
+    id: 'sop-outbound-default',
+    code: 'SOP-OB-001',
+    name: '电商订单出库 SOP',
+    title: '电商订单出库 SOP',
+    description: '适用于 B2C 电商订单的拣货、复核、打包、发货全流程',
+    type: 'outbound',
+    status: 'active',
+    version: 'V2.1',
+    owner: '仓储部 · 王晨',
+    duration: '约 25 分钟 / 单',
+    scenario: 'B2C 小件',
+    updatedAt: TODAY,
+    steps: [
+      { id: uid(), kind: 'action', title: '订单批次下发', description: 'WMS 根据订单时效优先级聚合波次，下发到拣货 PDA。', role: '系统自动 / 调度员', duration: '2min', tools: ['WMS','PDA'], risks: '波次切分过大导致超时', controls: '系统设置最大波次 50 单', checklist: ['波次单已生成','优先级正确'] },
+      { id: uid(), kind: 'action', title: '拣货作业', description: '按 PDA 推荐路径完成拣货，逐件扫码确认。', role: '拣货员', duration: '12min', tools: ['PDA','拣货车'], risks: '错拣 / 漏拣', controls: '扫码强校验 + 复核抽检', checklist: ['SKU 扫码一致','数量正确','物品无破损'] },
+      { id: uid(), kind: 'decision', title: '复核合格?', description: '复核员二次扫码全部 SKU，确认无误后流转打包。', role: '复核员', duration: '3min', condition: '复核是否通过', yesNext: 4, noNext: 'rework', checklist: ['SKU 全部复核','数量准确','无异常'] },
+      { id: uid(), kind: 'action', title: '打包 & 贴单', description: '按规格选用包材，称重并打印面单。', role: '打包员', duration: '5min', tools: ['打印机','称重台'], risks: '面单贴错单', controls: '一单一扫', checklist: ['面单清晰','重量在阈值内','包装牢固'] },
+      { id: uid(), kind: 'action', title: '交接发货', description: '快递员现场扫描签收，系统更新订单状态。', role: '发货员 / 快递', duration: '3min', tools: ['交接 PDA'], risks: '漏交接订单', controls: '交接清单签字确认', checklist: ['全部交接','无漏件','状态已更新'] }
+    ]
+  }
+];
+
+const TEMPLATES = [
+  { id: 'tpl-cold', name: '冷链运输 SOP', desc: '含温控、断链处置', icon: '❄️', sop: {
+    id: '', code: 'SOP-CC-001', name: '冷链运输 SOP', title: '冷链运输 SOP', description: '低温段全链路温控与异常处置',
+    type: 'transport', status: 'active', version: 'V1.0', owner: '运输部 · 张磊', duration: '依线路', scenario: '冷链 -18℃',
+    updatedAt: TODAY,
+    steps: [
+      { id: uid(), kind: 'action', title: '装车前温度校验', description: '验证冷藏车厢内温度 -18℃±2℃，记录温度计读数。', role: '司机 / 站长', duration: '5min', tools: ['温度计','车载温控'], risks: '温度异常导致全车货损', controls: '不达标禁止装车', checklist: ['温度合规','制冷开启','温控数据已采集'] },
+      { id: uid(), kind: 'action', title: '装车作业', description: '快速完成装车，避免冷链断链；每次开门时间 ≤ 5 分钟。', role: '装车工', duration: '15min', tools: ['叉车'], risks: '开门时间过长导致温升', controls: '门控时间监控', checklist: ['货物正确堆码','门控合规'] },
+      { id: uid(), kind: 'decision', title: '温度持续合格?', description: '运输途中每 30 分钟回传温度数据。', role: '车载系统', duration: '全程', condition: '温度是否持续合规', yesNext: 4, noNext: 'rescue', checklist: ['车载温控正常','GPS 在线'] },
+      { id: uid(), kind: 'action', title: '送达签收', description: '客户处再次测量温度，签收确认。', role: '司机 / 客户', duration: '10min', tools: ['手持温度计','PDA'], risks: '送达温度不合格被拒收', controls: '签收前必测', checklist: ['温度记录','签收单据','货损照片(如有)'] }
+    ]
+  }},
+  { id: 'tpl-cross', name: '跨境清关 SOP', desc: '含报关、查验联动', icon: '🌐', sop: {
+    id: '', code: 'SOP-CB-001', name: '跨境清关 SOP', title: '跨境清关 SOP', description: '出口段报关、查验、放行流程',
+    type: 'exception', status: 'active', version: 'V1.0', owner: '关务部 · 周敏', duration: '1~3 个工作日', scenario: '跨境出口',
+    updatedAt: TODAY,
+    steps: [
+      { id: uid(), kind: 'action', title: '报关资料准备', description: '收集商业发票、装箱单、合同、申报要素。', role: '关务专员', duration: '4h', tools: ['报关系统'], risks: '资料缺失导致延误', controls: '入仓前 24h 提交检查', checklist: ['发票','装箱单','合同','申报要素'] },
+      { id: uid(), kind: 'action', title: '电子申报', description: '通过单一窗口提交报关单。', role: '关务专员', duration: '1h', tools: ['单一窗口'], risks: '申报要素填错', controls: '关务主管复核', checklist: ['报关单已提交','回执已收到'] },
+      { id: uid(), kind: 'decision', title: '是否查验?', description: '海关系统是否触发查验指令。', role: '海关 / 系统', duration: '不确定', condition: '是否被布控查验', yesNext: 4, noNext: 5, checklist: ['查验通知','安排查验人员'] },
+      { id: uid(), kind: 'action', title: '配合查验', description: '陪同海关人员开箱查验并配合。', role: '关务现场员', duration: '半天', tools: ['现场对接'], risks: '查验不通过', controls: '查验前自查', checklist: ['查验报告','货物完好封箱'] },
+      { id: uid(), kind: 'action', title: '放行 & 提货', description: '海关放行后安排拖柜出口。', role: '关务 / 拖车', duration: '1~2 day', tools: ['拖车调度'], risks: '滞港费', controls: '放行 48h 内拖出', checklist: ['提货通知','拖车排程','离港'] }
+    ]
+  }}
+];
+
+const QUICK_PROMPTS = [
+  { label: '优化当前流程', text: '请帮我分析当前 SOP 的瓶颈，并给出 3 条优化建议。' },
+  { label: '检查风险点', text: '请逐步骤检查当前 SOP 的潜在风险点和漏控环节。' },
+  { label: '生成培训文档', text: '基于当前 SOP，输出一份给新员工的培训提纲，按步骤分节。' },
+  { label: '合规自检', text: '请检查当前 SOP 是否覆盖到关键的合规要求，列出待补项。' }
+];
+

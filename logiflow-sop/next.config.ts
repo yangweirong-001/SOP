@@ -20,12 +20,12 @@ const nextConfig: NextConfig = {
   }),
 
   // basePath 让所有静态资源和路由带上仓库名前缀
-  basePath: basePath || undefined,
-  assetPrefix: basePath || undefined,
+  // GitHub Pages 项目站点的 URL 是 /仓库名/，所以 basePath 必须是 /SOP
+  basePath: "/SOP",
+  assetPrefix: "/SOP",
 
   // 构建产物在 out/ 目录
   distDir: isStaticExport ? "out" : ".next",
-
 
   eslint: {
     // 构建时不阻塞在 lint 上（lint 单独通过 pnpm run lint 检查）

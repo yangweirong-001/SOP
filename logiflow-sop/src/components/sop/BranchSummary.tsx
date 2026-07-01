@@ -18,16 +18,16 @@ const toneStyles: Record<Tone, string> = {
 export function BranchSummary({ label, tone = "slate", items }: BranchSummaryProps) {
   const list = Array.isArray(items) ? items.filter((s) => !!s && s.trim()) : [];
   return (
-    <div className={`rounded-md border px-3 py-2 text-sm ${toneStyles[tone]}`}>
-      <div className="font-semibold mb-1">分支：{label}</div>
+    <div className={`rounded-lg border p-3 ${toneStyles[tone]}`}>
+      <div className="font-medium mb-2">分支：{label}</div>
       {list.length === 0 ? (
-        <div className="text-xs opacity-70">（暂无子步骤）</div>
+        <div className="text-sm opacity-60">（暂无子步骤）</div>
       ) : (
-        <ol className="list-decimal pl-5 space-y-0.5">
+        <ul className="list-disc list-inside space-y-1 text-sm">
           {list.map((it, i) => (
             <li key={i}>{it}</li>
           ))}
-        </ol>
+        </ul>
       )}
     </div>
   );

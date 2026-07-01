@@ -47,8 +47,9 @@ jobs:
           if [ "$REPO_NAME" = "${OWNER_NAME}.github.io" ]; then
             echo "base_path=" >> $GITHUB_OUTPUT
           else
-            echo "base_path=/$REPO_NAME" >> $GITHUB_OUTPUT
-          fi
+            echo "base_path=" >> $GITHUB_OUTPUT
+
+
 
       - name: Build static site
         env:

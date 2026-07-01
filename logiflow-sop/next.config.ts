@@ -24,7 +24,8 @@ const nextConfig: NextConfig = {
   assetPrefix: basePath || undefined,
 
   // 构建产物在 out/ 目录
-  distDir: isStaticExport ? ".next" : ".next",
+  distDir: isStaticExport ? "out" : ".next",
+
 
   eslint: {
     // 构建时不阻塞在 lint 上（lint 单独通过 pnpm run lint 检查）

@@ -59,10 +59,10 @@ export function StringListEditor({
 
   return (
     <div className="space-y-2">
-      <div className="text-sm font-medium text-slate-700">{label}</div>
+      <div className="font-medium text-sm">{label}</div>
       <div className="space-y-2">
         {list.map((item, idx) => (
-          <div key={idx} className="flex items-start gap-2">
+          <div key={idx} className="flex items-center gap-2">
             <textarea
               value={item}
               onChange={(e) => handleUpdate(idx, e.target.value)}

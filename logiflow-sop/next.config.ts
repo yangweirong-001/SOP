@@ -32,7 +32,7 @@ const nextConfig: NextConfig = {
   },
   typescript: {
     // 类型错误由 pnpm run ts-check 单独检查
-    ignoreBuildErrors: false,
+    ignoreBuildErrors: true,
   },
 };
 

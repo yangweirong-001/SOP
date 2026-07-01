@@ -1,5 +1,5 @@
 {
-  "name": "logiflow-sop",
+  "name": "projects",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -94,7 +94,5 @@
   "packageManager": "pnpm@9.0.0",
   "engines": {
     "pnpm": ">=9.0.0"
-  },
-  "description": "LogiFlow SOP · 物流 SOP 智能管理系统 — 可自部署的 SOP 编辑器，支持拖拽排序、判断节点、多媒体图注、AI 助手，导出 HTML/Word/PDF",
-  "license": "MIT"
+  }
 }

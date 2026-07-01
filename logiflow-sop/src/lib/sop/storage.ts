@@ -1,48 +1,72 @@
-import type { SopDoc } from './types';
+'use client';
 
-const SOPS_KEY = 'logiflow-sop:sops';
-const ACTIVE_KEY = 'logiflow-sop:activeId';
+import type { SopDoc, ActionStep, DecisionStep } from './types';
+import { DEFAULT_SOPS } from './default-sops';
 
-function isBrowser(): boolean {
-  return typeof window !== 'undefined';
+const STORAGE_KEY = 'logiflow_sops_v1';
+const ACTIVE_KEY = 'logiflow_active_sop_v1';
+
+/** 数据迁移：risks/controls 数组化 + DecisionStep 挂载到前一个 ActionStep */
+function migrateSteps(sop: SopDoc): SopDoc {
+  let lastActionId: number | undefined;
+  const steps = sop.steps.map((s) => {
+    if (s.type === 'action') {
+      const step = s as ActionStep;
+      lastActionId = step.id;
+      let risks = step.risks;
+      if (!risks || risks.length === 0) {
+        risks = step.risk ? [step.risk] : [];
+      }
+      let controls = step.controls;
+      if (!controls || controls.length === 0) {
+        controls = step.control ? [step.control] : [];
+      }
+      return { ...step, risks, controls };
+    }
+    const dec = s as DecisionStep;
+    if (dec.parentStepId != null) return dec;
+    // 悬空判断节点：自动挂到最近的 ActionStep
+    return { ...dec, parentStepId: lastActionId };
+  });
+  return { ...sop, steps };
 }
 
-/** 从 localStorage 读取所有 SOP 文档 */
 export function loadSops(): SopDoc[] {
-  if (!isBrowser()) return [];
+  if (typeof window === 'undefined') return DEFAULT_SOPS.map(migrateSteps);
   try {
-    const raw = window.localStorage.getItem(SOPS_KEY);
-    if (!raw) return [];
-    const data = JSON.parse(raw);
-    return Array.isArray(data) ? (data as SopDoc[]) : [];
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_SOPS.map(migrateSteps);
+    const parsed = JSON.parse(raw) as SopDoc[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_SOPS.map(migrateSteps);
+    return parsed.map(migrateSteps);
   } catch {
-    return [];
+    return DEFAULT_SOPS.map(migrateSteps);
   }
 }
 
-/** 保存所有 SOP 文档 */
 export function saveSops(sops: SopDoc[]): void {
-  if (!isBrowser()) return;
+  if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(SOPS_KEY, JSON.stringify(sops));
-  } catch {}
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sops));
+  } catch {
+    /* ignore */
+  }
 }
 
-/** 读取当前激活 SOP id */
 export function loadActiveId(fallback: string): string {
-  if (!isBrowser()) return fallback;
+  if (typeof window === 'undefined') return fallback;
   try {
-    const id = window.localStorage.getItem(ACTIVE_KEY);
-    return id || fallback;
+    return window.localStorage.getItem(ACTIVE_KEY) || fallback;
   } catch {
     return fallback;
   }
 }
 
-/** 记录当前激活 SOP id */
 export function saveActiveId(id: string): void {
-  if (!isBrowser()) return;
+  if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(ACTIVE_KEY, id);
-  } catch {}
+  } catch {
+    /* ignore */
+  }
 }

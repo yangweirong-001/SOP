@@ -1,0 +1,81 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Compute base path
+        id: basepath
+        run: |
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          if [ "$REPO_NAME" = "${OWNER}.github.io" ]; then
+            echo "prefix=" >> $GITHUB_OUTPUT
+          else
+            echo "prefix=/$REPO_NAME" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build static site
+        env:
+          NEXT_STATIC_EXPORT: "1"
+          NEXT_ASSET_PREFIX: ${{ steps.basepath.outputs.prefix }}
+          NEXT_PUBLIC_CHAT_API_URL: ${{ secrets.CHAT_API_URL }}
+        run: |
+          # 静态导出前先把 API 路由挪走（GitHub Pages 不支持 SSR）
+          if [ -d src/app/api ]; then
+            mv src/app/api /tmp/api-backup
+          fi
+          pnpm exec next build
+          # 生成 .nojekyll，防止 GitHub Pages 忽略 _next 目录
+          touch out/.nojekyll
+          # 恢复 API 路由（不影响后续本地开发）
+          if [ -d /tmp/api-backup ]; then
+            mv /tmp/api-backup src/app/api
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

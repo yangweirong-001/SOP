@@ -1,0 +1,1599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LogiFlow SOP · 物流 SOP 智能管理系统（单文件版）</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+  <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif; background: #f8fafc; }
+    * { -webkit-font-smoothing: antialiased; }
+
+    .sop-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .sop-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .sop-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    .flow-line { background: linear-gradient(to bottom, #2563eb, #4f46e5); }
+    .flow-line-tall { background: linear-gradient(to bottom, #2563eb, #4f46e5); width: 4px; height: 32px; margin: 4px auto; border-radius: 9999px; }
+
+    .step-card { transition: transform .25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow .25s cubic-bezier(0.4, 0, 0.2, 1), border-color .2s; }
+    .step-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px -6px rgba(15,23,42,.12); }
+
+    @keyframes fade-slide { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+    .animate-in { animation: fade-slide .18s ease-out; }
+    .fade-in { animation: fade-slide .18s ease-out; }
+    .slide-in-from-top-2 { animation: fade-slide .18s ease-out; }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.9); opacity: 0.8; }
+      70% { transform: scale(1.2); opacity: 0; }
+      100% { transform: scale(0.9); opacity: 0; }
+    }
+    .pulse-ring::before {
+      content: ''; position: absolute; inset: -4px; border-radius: 9999px;
+      background: rgba(59, 130, 246, 0.6); animation: pulse-ring 2s infinite;
+      z-index: -1;
+    }
+
+    /* 拖拽视觉 */
+    .drag-ghost { opacity: 0.4 !important; }
+    .drop-indicator { height: 3px; background: #3b82f6; border-radius: 9999px; margin: 4px 0; }
+
+    /* 加载提示 */
+    #boot {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #f8fafc; z-index: 9999; transition: opacity .3s; font-size: 14px; color: #64748b;
+    }
+    #boot.gone { opacity: 0; pointer-events: none; }
+
+    @media print {
+      @page { size: A4; margin: 16mm 14mm; }
+    }
+  </style>
+</head>
+<body>
+  <div id="boot">
+    <div>
+      <div style="text-align:center;font-size:22px;font-weight:700;color:#0f172a;margin-bottom:8px">LogiFlow SOP</div>
+      <div>正在加载编辑器 …（首次会加载 React / Tailwind / Babel，约 3~8 秒）</div>
+    </div>
+  </div>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef, useMemo, useCallback, Fragment } = React;
+
+    /* ============================================================
+     *  工具函数
+     * ============================================================ */
+    const uid = (() => { let n = Date.now(); return () => (++n).toString(36); })();
+    const cn = (...a) => a.filter(Boolean).join(' ');
+    const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+      { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
+    ));
+    const preWrap = (s) => escapeHtml(s ?? '').replace(/\n/g, '<br/>');
+    const nowDate = () => new Date().toISOString().slice(0, 10);
+
+    /* ============================================================
+     *  默认 SOP 数据
+     * ============================================================ */
+    const DEFAULT_SOPS = [
+      {
+        id: 'wh-inbound',
+        title: '跨境电商仓储入库标准作业程序',
+        description: '面向跨境保税仓 / 一般贸易仓，覆盖从预约到货、卸货验收、上架入库到系统结转的完整流程。',
+        category: '仓储',
+        owner: '仓储运营部',
+        duration: '约 3-6 小时',
+        scenario: '海运/空运集装箱、卡车零担到货，含常温、冷链、易碎品等。',
+        version: 'v2.4',
+        status: '已启用',
+        updatedAt: '2025-11-10',
+        steps: [
+          {
+            id: 's1', type: 'action', title: '预约到货核对',
+            content: '收到承运方到货通知后，核对入库预约单、装箱清单、报关单三方信息一致性。\n重点核对：SKU、数量、批次、货主、目的仓库。',
+            role: '仓储调度员', time: '15 min', tool: 'WMS · 预约模块 / OMS',
+            substeps: ['接收承运方到货通知，登记 ETA', '在 WMS 中调出对应预约单', '核对三方信息（预约单/装箱单/报关单）', '预分配月台并通知装卸组'],
+            risks: ['三方信息不一致导致后续入库账实差异', '未按预约时间到达占用月台'],
+            controls: ['三方核对差异 >5% 时立刻挂起并通知采购', '月台超时 30min 自动释放并重排'],
+            checklist: ['已确认到货 ETA', '已分配月台', '已通知装卸组', '异常已挂起'],
+          },
+          {
+            id: 's2', type: 'decision', title: '外包装初检', parentStepId: 's1',
+            content: '装卸时对外箱进行 100% 目视检查，判断是否存在破损、水渍、变形、封条异常。',
+            condition: '外箱是否完好？',
+            role: '仓储收货员', time: '5 min',
+            yesSubsteps: ['在 WMS 标记外观合格', '按 SKU 分区暂存到收货缓存区', '通知内检组开始点数'],
+            noSubsteps: ['现场拍照 6 面 + 破损细节', '开异常收货单并挂起该 pallet', '通知采购/承运方现场确认'],
+          },
+          {
+            id: 's3', type: 'action', title: '扫码点数与数量登记',
+            content: '按 pallet 逐箱扫码，系统实时比对预约数量。\n扫描过程中系统会自动累计已扫数量。',
+            role: '仓储收货员', time: '30-90 min', tool: 'WMS · 扫码收货 / PDA',
+            substeps: ['PDA 登录并选择该到货单', '按 pallet 逐箱扫码', '异常箱标记后单独处理', '扫完全部箱后确认累计数量'],
+            risks: ['漏扫或重复扫导致账面偏差', 'SKU 编码不一致导致收货失败'],
+            controls: ['每 pallet 完成后交叉复核 1 次', '编码异常需现场校对后放行'],
+            checklist: ['扫码总数与预约一致', '异常箱已单独隔离', '数据已实时上传 WMS'],
+          },
+          {
+            id: 's4', type: 'decision', title: '数量一致性检查', parentStepId: 's3',
+            content: '系统比对实际收货数量与预约数量差异是否在允许范围内（±2%）。',
+            condition: '数量差异是否在允许范围内？',
+            role: '系统', time: '实时',
+            yesSubsteps: ['系统自动过账并生成收货单', '触发抽检任务分配到品质组', '发送到货通知给采购'],
+            noSubsteps: ['冻结该收货单', '通知调度员到场复盘', '如超阈值需推送到采购总监审批'],
+          },
+          {
+            id: 's5', type: 'action', title: '质量抽检',
+            content: '按 GB 2828.1 抽样方案对该批次进行 AQL 抽检，重点检查外观、功能、随附资料。',
+            role: '品质检验员', time: '45-120 min', tool: '品质台账 / 抽检记录本',
+            substeps: ['依据 SKU 类别选择抽检方案', '按方案抽取样品', '外观+功能双维度检验', '填写抽检记录并上传照片'],
+            risks: ['抽检遗漏导致合格率虚高', '记录不完整无法追溯'],
+            controls: ['抽检合格率 <98% 时全检该批次', '每次抽检需 2 人签字确认'],
+            checklist: ['抽样数量符合方案', '外观/功能双检记录完整', '照片已归档'],
+          },
+          {
+            id: 's6', type: 'action', title: '上架入库',
+            content: '根据 SKU 特性（体积、重量、周转率）分配库位并 PDA 引导上架。',
+            role: '上架员', time: '60 min', tool: 'WMS · 库位管理 / PDA',
+            substeps: ['系统按 ABC 分类推荐库位', '打印上架任务并扫码上架', '每上一层复核 1 次'],
+            risks: ['错架导致后续拣货困难', '重货压轻货造成商品损伤'],
+            controls: ['系统按承重规则强制校验', '错架 5% 阈值触发工单'],
+            checklist: ['所有货物已上架', '库位标签更新', 'WMS 显示可用'],
+          },
+        ],
+      },
+      {
+        id: 'delivery-lastmile',
+        title: '末端配送派件作业标准程序',
+        description: '快递员每日站点分拣、扫描出库、上门派送、签收/异常闭环的标准动作。',
+        category: '配送',
+        owner: '配送运营部',
+        duration: '约 6-8 小时',
+        scenario: '城市末端网点、快递柜、社区自提点等派送场景。',
+        version: 'v1.6',
+        status: '已启用',
+        updatedAt: '2025-10-28',
+        steps: [
+          {
+            id: 'd1', type: 'action', title: '交接扫描',
+            content: '早间到站后完成本人所负责片区的所有包裹扫描交接。',
+            role: '快递员', time: '30 min', tool: '手持终端 PDA / 派件 App',
+            substeps: ['PDA 登录并选择今日班次', '逐一扫描到站包裹', '异常件（破损、错分）单独扫描', '现场签字交接'],
+            risks: ['漏扫导致漏派丢件', '错分件带走后需返站'],
+            controls: ['交接完成后系统自动比对派件清单', '异常件优先处理不得带走'],
+            checklist: ['已扫描当日所有包裹', '异常件已单独隔离', '交接单已签字'],
+          },
+          {
+            id: 'd2', type: 'action', title: '规划派件路线',
+            content: '根据派件量、地址密度、时效要求规划最优路线。',
+            role: '快递员', time: '10 min', tool: '派件 App · 路线规划',
+            substeps: ['App 自动生成初始路线', '快递员根据实际路况调整', '优先安排时效件（次晨达/当日达）'],
+            risks: ['路线规划不合理导致超时', '未提前联系造成二次派送'],
+            controls: ['App 内高亮时效件', '出门前统一群发到货短信'],
+            checklist: ['路线已优化', '时效件已置顶', '短信已发送'],
+          },
+          {
+            id: 'd3', type: 'decision', title: '收件人是否在家', parentStepId: 'd3-parent',
+            condition: '收件人是否可以当面签收？',
+            role: '快递员', time: '2 min',
+            yesSubsteps: ['当面签收并 PDA 拍照存证', '如为易碎/生鲜件请客户现场验货', '在 App 内标记签收完成'],
+            noSubsteps: ['电话联系客户确认放置方式', '按客户指示放至快递柜/驿站/门口', '拍摄放置照片并短信通知'],
+          },
+          {
+            id: 'd3-parent', type: 'action', title: '按门牌逐户派送',
+            content: '按规划路线上门派送，每一户完成签收或备用方案后再进入下一户。',
+            role: '快递员', time: '主体作业 4-6 h', tool: '派件 App / 短信',
+            substeps: ['到达门口敲门', '出示工牌确认收件人', '完成签收或备用方案'],
+            risks: ['冒领风险', '未经允许放柜引发投诉'],
+            controls: ['大件/贵重件必须当面签收', '放柜必须发送短信告知'],
+            checklist: ['已敲门/致电', '已确认收件人', '已完成签收或代收'],
+          },
+          {
+            id: 'd4', type: 'action', title: '异常件回站处理',
+            content: '未派成功（拒收、错址、无人签收超时）的包裹当日回站登记。',
+            role: '快递员 + 站长', time: '30 min', tool: 'WMS · 异常件登记',
+            substeps: ['将异常件带回站点', '在异常件登记表内录入原因', '交由站长次日重派或退回'],
+            risks: ['异常件积压占用库位', '未及时通知客户造成投诉'],
+            controls: ['异常件登记率 100%', '72h 内必须完成闭环'],
+            notes: ['冷链件回站需立即入冷藏', '虚假签收将纳入绩效扣分'],
+            checklist: ['异常件已回站', '登记表已填写', '客户已通知'],
+          },
+        ],
+      },
+      {
+        id: 'exception-handling',
+        title: '物流异常事件处理标准程序',
+        description: '面向破损、丢失、错发、超时等异常事件的响应、定责、赔付、复盘闭环。',
+        category: '异常',
+        owner: '客服运营中心',
+        duration: '响应 30 min，闭环 24-72 h',
+        scenario: '快递运输链路中出现的任何客户可感知异常，含 to C / to B 场景。',
+        version: 'v3.1',
+        status: '已启用',
+        updatedAt: '2025-11-05',
+        steps: [
+          {
+            id: 'e1', type: 'action', title: '异常事件接入',
+            content: '客服接到工单后 5 分钟内确认异常类型、发生环节、影响范围。',
+            role: '一线客服', time: '5 min', tool: '客服工单系统 / 内部 IM',
+            substeps: ['接收工单并阅读客户诉求', '在系统中查询运单全链路轨迹', '判断异常类型（破损/丢失/错发/超时）', '在 IM 中同步给对应操作组'],
+            risks: ['分类错误导致后续走错流程', '响应不及时引发客户升级'],
+            controls: ['5 min 首响 SLA', '系统内异常类型强制枚举'],
+            checklist: ['已阅读客户诉求', '已查询轨迹', '异常类型已录入'],
+          },
+          {
+            id: 'e2', type: 'decision', title: '异常严重度判定', parentStepId: 'e1',
+            condition: '是否为高风险异常（贵重物品/客诉升级/媒体曝光）？',
+            role: '客服主管', time: '10 min',
+            yesSubsteps: ['立刻升级到值班经理', '组建应急小组（客服+运营+法务）', '3h 内出初步应对方案'],
+            noSubsteps: ['按标准流程走线上处理', '预计 24h 内闭环'],
+          },
+          {
+            id: 'e3', type: 'action', title: '定责与取证',
+            content: '协同运输、仓储、末端网点定位责任环节并保留证据。',
+            role: '运营专员', time: '2-6 h', tool: '监控视频 / 运单系统',
+            substeps: ['调取签收/交接节点监控', '通知涉事网点上报书面说明', '整理证据链形成责任报告'],
+            risks: ['证据不足难以定责', '涉事网点隐瞒信息'],
+            controls: ['关键节点监控保留 90 天', '责任报告需 2 人复核'],
+            notes: ['监控调取需在 24h 内完成，超期覆盖'],
+            checklist: ['监控已调取', '涉事网点已回复', '责任报告已归档'],
+          },
+          {
+            id: 'e4', type: 'decision', title: '是否需要赔付', parentStepId: 'e3',
+            condition: '客户损失是否属于承运方责任范围？',
+            role: '客服主管 + 财务', time: '30 min',
+            yesSubsteps: ['按保价/服务协议计算赔付金额', '走赔付审批流程', '通知客户并完成支付'],
+            noSubsteps: ['向客户解释免责条款', '提供替代性补偿（券/积分）', '记录客户满意度'],
+          },
+          {
+            id: 'e5', type: 'action', title: '闭环与复盘',
+            content: '事件处理完成后进行客户回访、内部复盘、机制沉淀。',
+            role: '客服 + 运营', time: '2 h',
+            substeps: ['客户满意度回访', '内部复盘会议', '识别流程漏洞并建立改进项', '在异常知识库中沉淀案例'],
+            risks: ['复盘流于形式无改进', '同类问题反复发生'],
+            controls: ['月度 Top 5 异常必须复盘', '改进项跟踪到关闭'],
+            checklist: ['客户已回访', '复盘纪要已发布', '改进项已建立'],
+            notes: ['同一网点月度异常 >3 起需上报总部'],
+          },
+        ],
+      },
+    ];
+
+    /* ============================================================
+     *  Storage
+     * ============================================================ */
+    const STORAGE_KEY = 'logiflow-sop-app-v1';
+    const CURRENT_KEY = 'logiflow-sop-app-current';
+
+    function migrate(sops) {
+      return sops.map((sop) => ({
+        ...sop,
+        steps: (sop.steps || []).map((s) => {
+          if (s.type === 'action') {
+            const risks = s.risks ?? (s.risk ? [s.risk] : []);
+            const controls = s.controls ?? (s.control ? [s.control] : []);
+            return { ...s, risks, controls, checklist: s.checklist ?? [], notes: s.notes ?? [], substeps: s.substeps ?? [], images: s.images ?? [], imageCaptions: s.imageCaptions ?? [] };
+          }
+          return { ...s, yesSubsteps: s.yesSubsteps ?? [], noSubsteps: s.noSubsteps ?? [] };
+        }),
+      }));
+    }
+
+    function loadSops() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return migrate(JSON.parse(raw));
+      } catch (e) {}
+      return migrate(JSON.parse(JSON.stringify(DEFAULT_SOPS)));
+    }
+    function saveSops(list) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) {} }
+    function loadCurrent() { return localStorage.getItem(CURRENT_KEY) || ''; }
+    function saveCurrent(id) { try { localStorage.setItem(CURRENT_KEY, id); } catch (e) {} }
+
+    /* ============================================================
+     *  基础 UI
+     * ============================================================ */
+    function Button({ className = '', variant = 'default', size = 'md', children, ...rest }) {
+      const base = 'inline-flex items-center justify-center gap-1.5 font-medium rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1 disabled:opacity-50 disabled:pointer-events-none';
+      const variants = {
+        default: 'bg-blue-600 hover:bg-blue-700 text-white',
+        outline: 'border border-slate-300 bg-white hover:bg-slate-50 text-slate-700',
+        ghost: 'hover:bg-slate-100 text-slate-700',
+        danger: 'bg-red-600 hover:bg-red-700 text-white',
+        subtle: 'bg-slate-100 hover:bg-slate-200 text-slate-700',
+      };
+      const sizes = { sm: 'text-xs px-2 py-1', md: 'text-sm px-3 py-1.5', lg: 'text-base px-4 py-2' };
+      return <button className={cn(base, variants[variant], sizes[size], className)} {...rest}>{children}</button>;
+    }
+
+    function Input({ className = '', ...rest }) {
+      return <input className={cn('w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition', className)} {...rest} />;
+    }
+    function Textarea({ className = '', ...rest }) {
+      return <textarea className={cn('w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition resize-y', className)} {...rest} />;
+    }
+
+    /* Icons - 用 emoji + 简单 SVG 混合，避免额外依赖 */
+    const Icon = {
+      Warehouse: () => <span>📦</span>,
+      Truck: () => <span>🚚</span>,
+      Alert: () => <span>⚠️</span>,
+      Plus: () => <span className="text-lg leading-none">＋</span>,
+      Trash: () => <span>🗑</span>,
+      Up: () => <span>↑</span>,
+      Down: () => <span>↓</span>,
+      X: () => <span>×</span>,
+      Grip: () => <span className="text-slate-400">⋮⋮</span>,
+      Branch: () => <span>⑂</span>,
+      Save: () => <span>💾</span>,
+      Export: () => <span>⤓</span>,
+      AI: () => <span>🤖</span>,
+      Book: () => <span>📖</span>,
+      Image: () => <span>🖼</span>,
+      Check: () => <span>✓</span>,
+      Sparkle: () => <span>✨</span>,
+    };
+
+    /* Toast 极简实现 */
+    function useToast() {
+      const [items, setItems] = useState([]);
+      const push = useCallback((msg, tone = 'info') => {
+        const id = uid();
+        setItems((s) => [...s, { id, msg, tone }]);
+        setTimeout(() => setItems((s) => s.filter((x) => x.id !== id)), 2600);
+      }, []);
+      const view = (
+        <div className="fixed top-4 right-4 z-[100] space-y-2">
+          {items.map((it) => (
+            <div key={it.id} className={cn(
+              'px-4 py-2 rounded-md shadow-lg text-sm border animate-in fade-in slide-in-from-top-2',
+              it.tone === 'success' && 'bg-emerald-50 border-emerald-200 text-emerald-800',
+              it.tone === 'error' && 'bg-red-50 border-red-200 text-red-800',
+              it.tone === 'info' && 'bg-slate-800 text-white border-slate-700'
+            )}>{it.msg}</div>
+          ))}
+        </div>
+      );
+      return { push, view };
+    }
+
+    /* ============================================================
+     *  StringListEditor - 通用可增删列表编辑器
+     * ============================================================ */
+    function StringListEditor({ items, onChange, tone = 'default', placeholder = '', addLabel = '添加', label, count = true }) {
+      const toneClass = {
+        default: { chip: 'bg-slate-100 text-slate-600', border: 'border-slate-200' },
+        danger: { chip: 'bg-red-100 text-red-700', border: 'border-red-200' },
+        success: { chip: 'bg-emerald-100 text-emerald-700', border: 'border-emerald-200' },
+        info: { chip: 'bg-sky-100 text-sky-700', border: 'border-sky-200' },
+      }[tone] || { chip: 'bg-slate-100 text-slate-600', border: 'border-slate-200' };
+      return (
+        <div className="space-y-2">
+          {label != null && (
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              <span>{label}</span>
+              {count && items.length > 0 && <span className="text-slate-400">({items.length})</span>}
+            </div>
+          )}
+          {items.length === 0 && (
+            <div className={cn('text-xs text-slate-400 italic border border-dashed rounded-md py-2 px-3', toneClass.border)}>
+              {placeholder || '暂无内容，点击下方添加'}
+            </div>
+          )}
+          {items.map((it, i) => (
+            <div key={i} className="flex items-start gap-2 group">
+              <div className={cn('w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 mt-1', toneClass.chip)}>{i + 1}</div>
+              <Input value={it} onChange={(e) => onChange(items.map((x, j) => (j === i ? e.target.value : x)))} />
+              <button className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 mt-1.5 transition" onClick={() => onChange(items.filter((_, j) => j !== i))}><Icon.X /></button>
+            </div>
+          ))}
+          <button className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1" onClick={() => onChange([...items, ''])}>
+            <Icon.Plus /> {addLabel}
+          </button>
+        </div>
+      );
+    }
+
+    /* ============================================================
+     *  SubstepsEditor - 与 StringListEditor 类似，但可上下移动
+     * ============================================================ */
+    function SubstepsEditor({ items, onChange, placeholder = '', addLabel = '新增子步骤', hideLabel = false }) {
+      const move = (i, dir) => {
+        const t = i + dir;
+        if (t < 0 || t >= items.length) return;
+        const next = [...items]; [next[i], next[t]] = [next[t], next[i]]; onChange(next);
+      };
+      return (
+        <div className="space-y-2">
+          {!hideLabel && (
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              <span>操作子步骤</span>
+              {items.length > 0 && <span className="text-slate-400">({items.length})</span>}
+            </div>
+          )}
+          {items.length === 0 && (
+            <div className="text-xs text-slate-400 italic border border-dashed border-slate-200 rounded-md py-2 px-3">
+              {placeholder || '+ 拆分为多个编号子步骤'}
+            </div>
+          )}
+          {items.map((it, i) => (
+            <div key={i} className="flex items-start gap-2 group">
+              <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-semibold shrink-0 mt-1">{i + 1}</div>
+              <Input value={it} onChange={(e) => onChange(items.map((x, j) => (j === i ? e.target.value : x)))} />
+              <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                <button className="text-slate-400 hover:text-slate-700 text-xs" onClick={() => move(i, -1)}><Icon.Up /></button>
+                <button className="text-slate-400 hover:text-slate-700 text-xs" onClick={() => move(i, 1)}><Icon.Down /></button>
+              </div>
+              <button className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 mt-1.5 transition" onClick={() => onChange(items.filter((_, j) => j !== i))}><Icon.X /></button>
+            </div>
+          ))}
+          <button className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1" onClick={() => onChange([...items, ''])}>
+            <Icon.Plus /> {addLabel}
+          </button>
+        </div>
+      );
+    }
+
+    /* ============================================================
+     *  Sidebar - SOP 列表
+     * ============================================================ */
+    function Sidebar({ sops, currentId, onSelect, onCreate, onDelete, searchQ, onSearch }) {
+      const iconOf = (cat) => (
+        cat === '仓储' ? '📦' : cat === '配送' ? '🚚' : cat === '异常' ? '⚠️' : cat === '结算' ? '💰' : '📋'
+      );
+      return (
+        <aside className="w-64 shrink-0 border-r border-slate-200 bg-white flex flex-col">
+          <div className="p-4 border-b border-slate-200">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-md bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold">L</div>
+              <div>
+                <div className="font-bold text-slate-900 leading-tight">LogiFlow</div>
+                <div className="text-xs text-slate-500">SOP 编辑器 · 单文件版</div>
+              </div>
+            </div>
+          </div>
+          <div className="px-3 pt-3">
+            <div className="relative">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+              <input
+                value={searchQ || ''}
+                onChange={(e) => onSearch?.(e.target.value)}
+                placeholder="搜索 SOP / 步骤 / 描述"
+                className="w-full pl-7 pr-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-blue-500 focus:bg-white"
+              />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto sop-scroll p-3 space-y-1">
+            <div className="text-xs font-semibold text-slate-500 uppercase px-2 py-1">SOP 库 ({sops.length})</div>
+            {sops.length === 0 && (
+              <div className="text-xs text-slate-400 italic text-center py-6">没有匹配的 SOP</div>
+            )}
+            {sops.map((s) => (
+              <div
+                key={s.id}
+                onClick={() => onSelect(s.id)}
+                className={cn(
+                  'group px-3 py-2 rounded-md cursor-pointer flex items-center gap-2 text-sm transition',
+                  s.id === currentId ? 'bg-blue-50 text-blue-800 border-l-4 border-blue-500 pl-2' : 'hover:bg-slate-50 text-slate-700'
+                )}
+              >
+                <span className="text-lg">{iconOf(s.category)}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="truncate font-medium">{s.title || '未命名 SOP'}</div>
+                  <div className="text-xs text-slate-400 truncate">{s.steps.length} 步 · {s.category || '未分类'}</div>
+                </div>
+                <button
+                  className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 text-xs"
+                  onClick={(e) => { e.stopPropagation(); if (confirm(`删除 SOP「${s.title}」？`)) onDelete(s.id); }}
+                >×</button>
+              </div>
+            ))}
+            <button
+              className="w-full mt-2 text-sm text-blue-600 hover:text-blue-700 border border-dashed border-blue-300 hover:bg-blue-50 rounded-md py-2 flex items-center justify-center gap-1"
+              onClick={onCreate}
+            >
+              <Icon.Plus /> 新建 SOP
+            </button>
+          </div>
+          <div className="p-3 border-t border-slate-200 text-[11px] text-slate-400 leading-relaxed">
+            <div>💾 数据自动保存到浏览器</div>
+            <div>清缓存会丢，请顶栏「备份」导出 JSON</div>
+          </div>
+        </aside>
+      );
+    }
+
+    /* ============================================================
+     *  Header - 顶部工具栏
+     * ============================================================ */
+    function Header({ sop, savedFlash, lastSaved, extra }) {
+      const savedText = useMemo(() => {
+        if (!lastSaved) return '';
+        const diff = Math.max(0, Math.floor((Date.now() - lastSaved) / 1000));
+        if (diff < 5) return '刚刚已保存';
+        if (diff < 60) return `${diff}s 前保存`;
+        return `${Math.floor(diff / 60)}m 前保存`;
+      }, [lastSaved, savedFlash]);
+      return (
+        <header className="bg-white border-b border-slate-200 h-14 px-6 flex items-center justify-between sticky top-0 z-30">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-1 text-xs text-slate-400">
+              <span className="text-slate-500 font-medium">LogiFlow</span>
+              <span>›</span>
+              <span>{sop?.category || 'SOP'}</span>
+              <span>›</span>
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-slate-800 truncate max-w-[420px]">{sop?.title || '（未选择 SOP）'}</div>
+              <div className="text-[11px] text-slate-500 truncate">{sop?.version} · 更新于 {sop?.updatedAt} · {sop?.steps?.length || 0} 步</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={cn('text-[11px] transition',
+              savedFlash ? 'text-emerald-600' : 'text-slate-400'
+            )}>
+              {savedFlash ? '✓ 已保存到浏览器' : savedText}
+            </span>
+            {extra}
+            <ExportMenu sop={sop} />
+          </div>
+        </header>
+      );
+    }
+
+    /* ============================================================
+     *  ExportMenu - 导出下拉
+     * ============================================================ */
+    function ExportMenu({ sop }) {
+      const [open, setOpen] = useState(false);
+      const wrapRef = useRef(null);
+      useEffect(() => {
+        const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+      }, []);
+      if (!sop) return null;
+      return (
+        <div ref={wrapRef} className="relative">
+          <Button variant="outline" onClick={() => setOpen((v) => !v)}>
+            <Icon.Export /> 导出
+          </Button>
+          {open && (
+            <div className="absolute right-0 mt-1 w-40 rounded-md border border-slate-200 bg-white shadow-lg py-1 z-40">
+              {[
+                { key: 'html', label: '导出为 HTML' },
+                { key: 'word', label: '导出为 Word' },
+                { key: 'pdf', label: '导出为 PDF' },
+              ].map((o) => (
+                <button
+                  key={o.key}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50"
+                  onClick={() => { setOpen(false); exportSop(sop, o.key); }}
+                >{o.label}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ============================================================
+     *  SopHeaderEditor
+     * ============================================================ */
+    function SopHeaderEditor({ sop, onChange }) {
+      const [expand, setExpand] = useState(true);
+      return (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 transition">
+          <div className="p-6 space-y-4">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center text-2xl shrink-0">📋</div>
+              <div className="flex-1 min-w-0 space-y-2">
+                <input value={sop.title} onChange={(e) => onChange({ title: e.target.value })} className="w-full text-2xl font-bold text-slate-900 bg-transparent outline-none border-b-2 border-transparent hover:border-slate-200 focus:border-blue-500 pb-1 transition" placeholder="SOP 标题" />
+                <textarea value={sop.description} onChange={(e) => onChange({ description: e.target.value })} rows={2} className="w-full text-sm text-slate-600 bg-transparent outline-none border border-transparent hover:border-slate-200 focus:border-blue-500 rounded p-1 resize-none transition" placeholder="SOP 简介（一句话讲清它做什么、面向什么场景）" />
+              </div>
+              <button className="text-slate-400 hover:text-slate-700 text-sm" onClick={() => setExpand((v) => !v)}>{expand ? '收起' : '展开'}</button>
+            </div>
+            {expand && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-slate-100">
+                {[
+                  { key: 'category', label: '所属类目', placeholder: '如：仓储 / 配送 / 异常' },
+                  { key: 'owner', label: '负责部门', placeholder: '如：仓储运营部' },
+                  { key: 'duration', label: '预计时长', placeholder: '如：约 3-6 小时' },
+                  { key: 'version', label: '版本号', placeholder: 'v1.0' },
+                ].map((f) => (
+                  <div key={f.key}>
+                    <div className="text-xs font-medium text-slate-500 mb-1">{f.label}</div>
+                    <Input value={sop[f.key] || ''} onChange={(e) => onChange({ [f.key]: e.target.value })} placeholder={f.placeholder} />
+                  </div>
+                ))}
+                <div>
+                  <div className="text-xs font-medium text-slate-500 mb-1">状态</div>
+                  <select className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:border-blue-500" value={sop.status} onChange={(e) => onChange({ status: e.target.value })}>
+                    {['草稿', '评审中', '已启用', '已归档'].map((v) => <option key={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-500 mb-1">更新日期</div>
+                  <Input type="date" value={sop.updatedAt || ''} onChange={(e) => onChange({ updatedAt: e.target.value })} />
+                </div>
+                <div className="col-span-2 md:col-span-2">
+                  <div className="text-xs font-medium text-slate-500 mb-1">适用场景</div>
+                  <Input value={sop.scenario || ''} onChange={(e) => onChange({ scenario: e.target.value })} placeholder="如：海运/空运集装箱、卡车零担到货" />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    /* ============================================================
+     *  SopOutline - 目录
+     * ============================================================ */
+    function SopOutline({ sop, onJump }) {
+      const [collapsed, setCollapsed] = useState(false);
+      const groups = useMemo(() => buildGroups(sop.steps), [sop.steps]);
+      if (!sop.steps.length) return null;
+      return (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">📖 SOP 目录</div>
+            <button className="text-xs text-slate-500 hover:text-slate-800" onClick={() => setCollapsed((v) => !v)}>{collapsed ? '展开' : '收起'}</button>
+          </div>
+          {!collapsed && (
+            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+              {groups.map((g, gi) => (
+                <React.Fragment key={g.step.id}>
+                  <button className="text-left py-1 text-slate-700 hover:text-blue-700" onClick={() => onJump(g.step.id)}>
+                    <span className="inline-block w-6 text-blue-600 font-semibold">{gi + 1}.</span>
+                    {g.step.title}
+                  </button>
+                  {g.children.map((c) => (
+                    <button key={c.id} className="text-left py-1 pl-8 text-slate-500 hover:text-amber-700 text-[13px]" onClick={() => onJump(c.id)}>
+                      <span className="text-amber-600">◇</span> {c.title}
+                    </button>
+                  ))}
+                </React.Fragment>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* 把 steps 拆成 [{ step: action, children: [decisions...] }] */
+    function buildGroups(steps) {
+      const groups = [];
+      const orphans = [];
+      for (const s of steps) {
+        if (s.type === 'action') groups.push({ step: s, children: [] });
+      }
+      for (const s of steps) {
+        if (s.type === 'decision') {
+          const parent = groups.find((g) => g.step.id === s.parentStepId);
+          if (parent) parent.children.push(s);
+          else orphans.push(s);
+        }
+      }
+      // 悬空的 decision 单独作为一组，防止丢失
+      for (const o of orphans) groups.push({ step: o, children: [] });
+      return groups;
+    }
+
+    /* ============================================================
+     *  StepList - 步骤列表，支持整组拖拽
+     * ============================================================ */
+    function StepList({ sop, selectedId, onSelect, onChange, toast }) {
+      const groups = useMemo(() => buildGroups(sop.steps), [sop.steps]);
+      const [dragId, setDragId] = useState(null);
+      const [overId, setOverId] = useState(null);
+
+      const addAction = () => {
+        const id = uid();
+        onChange((s) => ({
+          steps: [...s.steps, { id, type: 'action', title: '新操作步骤', content: '', role: '', time: '', tool: '', substeps: [], risks: [], controls: [], checklist: [], notes: [], images: [], imageCaptions: [] }],
+        }));
+        onSelect(id);
+      };
+      const addDecision = (parentId) => {
+        const id = uid();
+        onChange((s) => {
+          // 插入到 parent 组的末尾
+          const idx = s.steps.findIndex((x) => x.id === parentId);
+          if (idx < 0) return {};
+          let insertAt = idx + 1;
+          while (insertAt < s.steps.length && s.steps[insertAt].type === 'decision' && s.steps[insertAt].parentStepId === parentId) insertAt++;
+          const nextSteps = [...s.steps];
+          nextSteps.splice(insertAt, 0, { id, type: 'decision', title: '新增判断', content: '', condition: '', role: '', time: '', parentStepId: parentId, yesSubsteps: [], noSubsteps: [] });
+          return { steps: nextSteps };
+        });
+        onSelect(id);
+      };
+      const deleteStep = (id) => {
+        onChange((s) => ({
+          steps: s.steps.filter((x) => x.id !== id && x.parentStepId !== id),
+        }));
+        if (selectedId === id) onSelect(null);
+      };
+
+      /* 拖拽：只允许拖动 action 整组（含其挂载的 decision） */
+      const onDragStart = (gid) => setDragId(gid);
+      const onDragOver = (gid, e) => { e.preventDefault(); setOverId(gid); };
+      const onDrop = (targetId) => {
+        if (!dragId || dragId === targetId) { setDragId(null); setOverId(null); return; }
+        onChange((s) => {
+          // 抽出 dragId 组和 targetId 组
+          const packed = [];
+          for (const st of s.steps) {
+            if (st.type === 'action') packed.push([st]);
+            else {
+              const last = packed[packed.length - 1];
+              if (last && last[0].id === st.parentStepId) last.push(st);
+              else packed.push([st]);
+            }
+          }
+          const from = packed.findIndex((p) => p[0].id === dragId);
+          const to = packed.findIndex((p) => p[0].id === targetId);
+          if (from < 0 || to < 0) return {};
+          const [moved] = packed.splice(from, 1);
+          packed.splice(to, 0, moved);
+          return { steps: packed.flat() };
+        });
+        setDragId(null); setOverId(null);
+      };
+
+      return (
+        <div className="space-y-3">
+          {groups.map((g, gi) => (
+            <div
+              key={g.step.id}
+              draggable
+              onDragStart={() => onDragStart(g.step.id)}
+              onDragOver={(e) => onDragOver(g.step.id, e)}
+              onDrop={() => onDrop(g.step.id)}
+              onDragEnd={() => { setDragId(null); setOverId(null); }}
+              className={cn('relative transition', dragId === g.step.id && 'drag-ghost', overId === g.step.id && dragId !== g.step.id && 'ring-2 ring-blue-400 rounded-xl')}
+            >
+              <StepCard step={g.step} index={gi + 1} selected={selectedId === g.step.id} onClick={() => onSelect(g.step.id)} onDelete={() => deleteStep(g.step.id)} onAddDecision={() => addDecision(g.step.id)} isGroupHead={true} />
+              {g.children.length > 0 && (
+                <div className="ml-8 mt-2 space-y-2 border-l-2 border-amber-200 pl-4 py-1">
+                  {g.children.map((c, ci) => (
+                    <StepCard key={c.id} step={c} index={`${gi + 1}.${ci + 1}`} selected={selectedId === c.id} onClick={() => onSelect(c.id)} onDelete={() => deleteStep(c.id)} decision />
+                  ))}
+                </div>
+              )}
+              {gi < groups.length - 1 && <div className="flow-line-tall" />}
+            </div>
+          ))}
+          <button className="w-full text-sm text-blue-600 hover:text-blue-700 border-2 border-dashed border-blue-300 hover:bg-blue-50 rounded-md py-3 flex items-center justify-center gap-1 transition" onClick={addAction}>
+            <Icon.Plus /> 添加操作步骤
+          </button>
+        </div>
+      );
+    }
+
+    function StepCard({ step, index, selected, onClick, onDelete, onAddDecision, isGroupHead, decision }) {
+      const isDec = decision || step.type === 'decision';
+      return (
+        <div id={`anchor-${step.id}`}
+          onClick={onClick}
+          className={cn(
+            'step-card group relative rounded-xl border shadow-sm cursor-pointer',
+            selected ? 'ring-4 ring-blue-200 border-blue-400' : 'border-slate-200 hover:border-slate-300',
+            isDec ? 'bg-amber-50/60 border-amber-200' : 'bg-white',
+          )}
+        >
+          <div className="p-4 flex items-start gap-3">
+            {isGroupHead && <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 mt-1"><Icon.Grip /></div>}
+            <div className={cn('w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0',
+              isDec ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+            )}>{index}</div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="font-semibold text-slate-800 truncate">{step.title || '未命名'}</div>
+                {isDec && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-800">判断节点</span>}
+                {!isDec && step.role && <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">👤 {step.role}</span>}
+                {!isDec && step.time && <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">⏱ {step.time}</span>}
+              </div>
+              <div className="text-xs text-slate-500 mt-1 line-clamp-2 whitespace-pre-wrap">{isDec ? (step.condition || step.content) : step.content}</div>
+              {!isDec && step.substeps?.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1 text-[11px]">
+                  {step.substeps.slice(0, 5).map((s, i) => (
+                    <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">{i + 1}. {(s || '').slice(0, 12)}{s && s.length > 12 ? '…' : ''}</span>
+                  ))}
+                  {step.substeps.length > 5 && <span className="text-slate-400">+{step.substeps.length - 5}</span>}
+                </div>
+              )}
+              {isDec && (
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2 rounded bg-emerald-50 border border-emerald-200"><span className="font-semibold text-emerald-700">是 →</span> {step.yesSubsteps?.length || 0} 步</div>
+                  <div className="p-2 rounded bg-red-50 border border-red-200"><span className="font-semibold text-red-700">否 →</span> {step.noSubsteps?.length || 0} 步</div>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition">
+              {isGroupHead && (
+                <button title="添加判断节点" className="text-amber-600 hover:text-amber-700 text-sm" onClick={(e) => { e.stopPropagation(); onAddDecision(); }}><Icon.Branch /></button>
+              )}
+              <button title="删除" className="text-slate-400 hover:text-red-500 text-sm" onClick={(e) => { e.stopPropagation(); if (confirm('确认删除该' + (isDec ? '判断节点' : '步骤 + 其判断') + '？')) onDelete(); }}><Icon.Trash /></button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ============================================================
+     *  StepDetailPanel - 右侧属性面板
+     * ============================================================ */
+    function StepDetailPanel({ sop, step, onChange, onClose, toast }) {
+      const isDec = step.type === 'decision';
+      const update = (patch) => {
+        onChange((s) => ({ steps: s.steps.map((x) => x.id === step.id ? { ...x, ...patch } : x) }));
+      };
+
+      return (
+        <aside className="w-[380px] shrink-0 border-l border-slate-200 bg-white overflow-y-auto sop-scroll">
+          <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between z-10">
+            <div className="text-sm font-semibold text-slate-800">{isDec ? '判断节点编辑' : '操作步骤编辑'}</div>
+            <button className="text-slate-400 hover:text-slate-700" onClick={onClose}>×</button>
+          </div>
+          <div className="p-4 space-y-4">
+            <div>
+              <div className="text-xs font-semibold text-slate-600 mb-1">标题</div>
+              <Input value={step.title} onChange={(e) => update({ title: e.target.value })} />
+            </div>
+            {isDec ? (
+              <>
+                <div>
+                  <div className="text-xs font-semibold text-slate-600 mb-1">判断条件</div>
+                  <Textarea rows={2} value={step.condition || ''} onChange={(e) => update({ condition: e.target.value })} placeholder="例如：外箱是否完好？" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-slate-600 mb-1">说明</div>
+                  <Textarea rows={3} value={step.content || ''} onChange={(e) => update({ content: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-600 mb-1">责任人</div>
+                    <Input value={step.role || ''} onChange={(e) => update({ role: e.target.value })} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-slate-600 mb-1">耗时</div>
+                    <Input value={step.time || ''} onChange={(e) => update({ time: e.target.value })} />
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg border border-emerald-200 bg-emerald-50/60">
+                  <div className="text-xs font-semibold text-emerald-800 mb-2">是 · 分支子步骤</div>
+                  <SubstepsEditor items={step.yesSubsteps || []} onChange={(v) => update({ yesSubsteps: v })} placeholder="+ 添加「是」分支的操作步骤" addLabel="新增子步骤" hideLabel />
+                </div>
+                <div className="p-3 rounded-lg border border-red-200 bg-red-50/60">
+                  <div className="text-xs font-semibold text-red-800 mb-2">否 · 分支子步骤</div>
+                  <SubstepsEditor items={step.noSubsteps || []} onChange={(v) => update({ noSubsteps: v })} placeholder="+ 添加「否」分支的操作步骤" addLabel="新增子步骤" hideLabel />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <div className="text-xs font-semibold text-slate-600 mb-1">详细操作说明 <span className="text-slate-400 font-normal">(支持换行)</span></div>
+                  <Textarea rows={4} value={step.content || ''} onChange={(e) => update({ content: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-600 mb-1">责任人</div>
+                    <Input value={step.role || ''} onChange={(e) => update({ role: e.target.value })} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-slate-600 mb-1">耗时</div>
+                    <Input value={step.time || ''} onChange={(e) => update({ time: e.target.value })} />
+                  </div>
+                  <div className="col-span-2">
+                    <div className="text-xs font-semibold text-slate-600 mb-1">工具/系统</div>
+                    <Input value={step.tool || ''} onChange={(e) => update({ tool: e.target.value })} placeholder="如：WMS · 扫码收货 / PDA" />
+                  </div>
+                </div>
+                <SubstepsEditor items={step.substeps || []} onChange={(v) => update({ substeps: v })} placeholder="+ 拆分为多个编号子步骤" />
+                <StringListEditor label="检查清单" tone="info" items={step.checklist || []} onChange={(v) => update({ checklist: v })} placeholder="+ 一条条列出可勾选检查点" addLabel="新增检查项" />
+                <StringListEditor label="风险点" tone="danger" items={step.risks || []} onChange={(v) => update({ risks: v })} placeholder="+ 列出该步骤可能出现的风险" addLabel="新增风险点" />
+                <StringListEditor label="管控措施" tone="success" items={step.controls || []} onChange={(v) => update({ controls: v })} placeholder="+ 对应的管控 / 兜底措施" addLabel="新增管控措施" />
+                <StringListEditor label="备注" items={step.notes || []} onChange={(v) => update({ notes: v })} placeholder="+ 需要额外提醒的信息、经验、依赖" addLabel="新增备注" />
+                <ImageGallery step={step} onChange={update} toast={toast} />
+              </>
+            )}
+          </div>
+        </aside>
+      );
+    }
+
+    /* ============================================================
+     *  ImageGallery - 支持粘贴 / 拖拽 / 选择 / caption
+     * ============================================================ */
+    function ImageGallery({ step, onChange, toast }) {
+      const images = step.images || [];
+      const captions = step.imageCaptions || [];
+      const dropRef = useRef(null);
+
+      const addImage = (dataUrl) => {
+        onChange({
+          images: [...images, dataUrl],
+          imageCaptions: [...captions, ''],
+        });
+      };
+      const removeImage = (i) => {
+        onChange({
+          images: images.filter((_, j) => j !== i),
+          imageCaptions: captions.filter((_, j) => j !== i),
+        });
+      };
+      const updateCaption = (i, v) => {
+        const nx = [...captions]; while (nx.length < images.length) nx.push(''); nx[i] = v;
+        onChange({ imageCaptions: nx });
+      };
+
+      const handleFiles = (files) => {
+        Array.from(files || []).forEach((f) => {
+          if (!f.type.startsWith('image/')) return;
+          const fr = new FileReader();
+          fr.onload = () => addImage(fr.result);
+          fr.readAsDataURL(f);
+        });
+      };
+
+      const onPaste = (e) => {
+        const items = e.clipboardData?.items || [];
+        let handled = false;
+        for (const it of items) {
+          if (it.kind === 'file') {
+            const f = it.getAsFile();
+            if (f && f.type.startsWith('image/')) { handleFiles([f]); handled = true; }
+          }
+        }
+        if (!handled && e.clipboardData?.files?.length) {
+          handleFiles(e.clipboardData.files); handled = true;
+        }
+        if (handled) { e.preventDefault(); toast?.('已粘贴图片', 'success'); }
+      };
+
+      const onDrop = (e) => {
+        e.preventDefault();
+        if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
+      };
+
+      return (
+        <div>
+          <div className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-2">
+            <Icon.Image /> 示例图片 {images.length > 0 && <span className="text-slate-400 font-normal">({images.length})</span>}
+          </div>
+          <div
+            ref={dropRef}
+            tabIndex={0}
+            onPaste={onPaste}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={onDrop}
+            className="border-2 border-dashed border-slate-300 rounded-lg p-3 hover:border-blue-400 focus:border-blue-500 focus:outline-none space-y-3"
+          >
+            {images.length === 0 && (
+              <div className="text-xs text-slate-400 text-center py-4">
+                📎 拖拽 / 粘贴（Ctrl+V）图片到此处<br />
+                <span className="text-[11px]">或点击下方按钮选择文件</span>
+              </div>
+            )}
+            {images.map((src, i) => (
+              <div key={i} className="rounded-lg border border-slate-200 bg-slate-50 overflow-hidden group">
+                <div className="relative">
+                  <img src={src} alt="" className="w-full max-h-64 object-contain bg-white" />
+                  <button className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 shadow text-red-600 opacity-0 group-hover:opacity-100" onClick={() => removeImage(i)}>×</button>
+                </div>
+                <input
+                  className="w-full px-3 py-1.5 text-xs bg-white border-t border-slate-200 outline-none focus:bg-blue-50"
+                  placeholder="添加图片说明（可选）"
+                  value={captions[i] || ''}
+                  onChange={(e) => updateCaption(i, e.target.value)}
+                />
+              </div>
+            ))}
+            <div className="flex justify-center">
+              <label className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 cursor-pointer">
+                <Icon.Plus /> 选择图片
+                <input type="file" accept="image/*" multiple hidden onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
+              </label>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ============================================================
+     *  导出：HTML / Word / PDF
+     * ============================================================ */
+    function buildPrintHtml(sop, forPdf = false) {
+      const groups = buildGroups(sop.steps);
+      const styles = `
+        body { font-family: "PingFang SC","Microsoft YaHei",Arial,sans-serif; color:#0f172a; line-height:1.65; margin:0; padding:32px; background:#fff; }
+        .doc-header { border-bottom: 3px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px; }
+        .doc-title { font-size: 26px; font-weight: 800; margin: 0 0 8px; color:#0f172a; }
+        .doc-meta { display:flex; flex-wrap:wrap; gap:12px; color:#64748b; font-size:13px; }
+        .doc-meta span { display:inline-block; padding:2px 10px; background:#eff6ff; color:#1e40af; border-radius:9999px; }
+        .doc-desc { font-size:14px; color:#334155; margin: 12px 0 0; }
+        .toc { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px 20px; margin-bottom:24px; }
+        .toc h3 { margin:0 0 12px; font-size:16px; color:#0f172a; }
+        .toc ol { padding-left: 24px; margin:0; }
+        .toc li { margin:4px 0; font-size:14px; }
+        .toc a { color:#334155; text-decoration:none; }
+        .toc .sub { padding-left: 20px; color:#64748b; font-size:13px; }
+        .group { margin-bottom: 24px; page-break-inside: avoid; }
+        .action { border:1px solid #e2e8f0; border-radius:12px; padding:20px 24px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+        .action-title { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+        .action-title .badge { width:32px; height:32px; border-radius:9999px; background:#dbeafe; color:#1e40af; font-weight:700; display:inline-flex; align-items:center; justify-content:center; font-size:14px; }
+        .action-title h2 { font-size:18px; font-weight:700; color:#0f172a; margin:0; }
+        .chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+        .chip { font-size:12px; padding:2px 10px; background:#f1f5f9; color:#475569; border-radius:9999px; }
+        .section-label { font-size:12px; font-weight:700; color:#475569; margin: 12px 0 6px; letter-spacing:.5px; }
+        .content { font-size:14px; color:#334155; white-space:pre-wrap; }
+        ol.sub-list { padding-left:22px; margin:6px 0; }
+        ol.sub-list li { margin:3px 0; font-size:14px; color:#0f172a; }
+        ul.list { padding-left:22px; margin:6px 0; }
+        ul.list li { margin:3px 0; font-size:14px; }
+        ul.risk li { color:#b91c1c; }
+        ul.control li { color:#047857; }
+        ul.check li { color:#0369a1; }
+        ul.note li { color:#7c2d12; }
+        .decision { border:1px solid #fde68a; background:#fffbeb; border-radius:12px; padding:16px 20px; margin: 12px 0 12px 32px; }
+        .decision-title { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+        .decision-title .db { width:28px; height:28px; border-radius:9999px; background:#fde68a; color:#92400e; font-weight:700; display:inline-flex; align-items:center; justify-content:center; font-size:13px; }
+        .decision-title h3 { font-size:15px; font-weight:700; margin:0; color:#92400e; }
+        .condition { background:#fff; border:1px solid #fde68a; border-radius:6px; padding:6px 10px; font-size:13px; margin:6px 0; color:#78350f; }
+        .branches { display:flex; gap:12px; margin-top:8px; }
+        .branch { flex:1; border-radius:8px; padding:10px 14px; }
+        .branch.yes { background:#ecfdf5; border:1px solid #a7f3d0; }
+        .branch.no { background:#fef2f2; border:1px solid #fecaca; }
+        .branch h4 { margin:0 0 6px; font-size:13px; }
+        .branch.yes h4 { color:#065f46; }
+        .branch.no h4 { color:#991b1b; }
+        .branch ol { padding-left:20px; margin:0; font-size:13px; }
+        .branch li { margin:2px 0; }
+        .step-badge { display:inline-block; background:#dbeafe; color:#1e40af; font-size:11px; padding:1px 8px; border-radius:9999px; margin-right:6px; font-weight:600; }
+        .img-wrap { margin: 10px 0; }
+        .img-wrap img { max-width: 100%; width: 100%; border:1px solid #e2e8f0; border-radius:8px; display:block; }
+        .img-cap { text-align:center; color:#64748b; font-size:12px; margin-top:4px; font-style:italic; }
+      `;
+
+      const chipList = (arr, cls) => arr.length ? `<ul class="list ${cls}">${arr.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : '';
+      const subList = (arr) => arr.length ? `<ol class="sub-list">${arr.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ol>` : '';
+      const imgBlock = (step) => {
+        const imgs = step.images || []; const caps = step.imageCaptions || [];
+        if (!imgs.length) return '';
+        return imgs.map((src, i) => `<div class="img-wrap"><img src="${src}" width="720"/>${caps[i] ? `<div class="img-cap">${escapeHtml(caps[i])}</div>` : ''}</div>`).join('');
+      };
+
+      const decisionHtml = (d) => {
+        const yes = (d.yesSubsteps || []).map((s, i) => `<li>${escapeHtml(s)}</li>`).join('');
+        const no = (d.noSubsteps || []).map((s, i) => `<li>${escapeHtml(s)}</li>`).join('');
+        return `
+          <div class="decision" id="anc-${d.id}">
+            <div class="decision-title"><span class="db">⑂</span><h3>${escapeHtml(d.title)}</h3></div>
+            ${d.condition ? `<div class="condition">条件：${escapeHtml(d.condition)}</div>` : ''}
+            ${d.content ? `<div class="content">${preWrap(d.content)}</div>` : ''}
+            <div class="branches">
+              <div class="branch yes"><h4>✅ 是 · 后续步骤</h4><ol>${yes || '<li style="color:#94a3b8">未配置</li>'}</ol></div>
+              <div class="branch no"><h4>❌ 否 · 后续步骤</h4><ol>${no || '<li style="color:#94a3b8">未配置</li>'}</ol></div>
+            </div>
+          </div>
+        `;
+      };
+
+      const groupHtml = (g, idx) => {
+        const s = g.step;
+        if (s.type === 'decision') {
+          return `<div class="group">${decisionHtml(s)}</div>`;
+        }
+        return `
+          <div class="group">
+            <div class="action" id="anc-${s.id}">
+              <div class="action-title"><span class="badge">${idx}</span><h2>${escapeHtml(s.title)}</h2></div>
+              <div class="chips">
+                ${s.role ? `<span class="chip">👤 ${escapeHtml(s.role)}</span>` : ''}
+                ${s.time ? `<span class="chip">⏱ ${escapeHtml(s.time)}</span>` : ''}
+                ${s.tool ? `<span class="chip">🛠 ${escapeHtml(s.tool)}</span>` : ''}
+              </div>
+              ${s.content ? `<div class="content">${preWrap(s.content)}</div>` : ''}
+              ${s.substeps?.length ? `<div class="section-label">操作子步骤</div>${subList(s.substeps)}` : ''}
+              ${s.checklist?.length ? `<div class="section-label">检查清单</div>${chipList(s.checklist, 'check')}` : ''}
+              ${s.risks?.length ? `<div class="section-label">风险点</div>${chipList(s.risks, 'risk')}` : ''}
+              ${s.controls?.length ? `<div class="section-label">管控措施</div>${chipList(s.controls, 'control')}` : ''}
+              ${s.notes?.length ? `<div class="section-label">备注</div>${chipList(s.notes, 'note')}` : ''}
+              ${imgBlock(s)}
+            </div>
+            ${g.children.map((c) => decisionHtml(c)).join('')}
+          </div>
+        `;
+      };
+
+      const tocHtml = `
+        <div class="toc">
+          <h3>📖 目录</h3>
+          <ol>
+            ${groups.map((g, i) => `
+              <li><a href="#anc-${g.step.id}">${escapeHtml(g.step.title)}</a>
+                ${g.children.length ? `<ol class="sub">${g.children.map((c) => `<li><a href="#anc-${c.id}">${escapeHtml(c.title)}</a></li>`).join('')}</ol>` : ''}
+              </li>
+            `).join('')}
+          </ol>
+        </div>
+      `;
+
+      return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>${escapeHtml(sop.title)}</title>
+<style>${styles}</style></head><body>
+<div class="doc-header">
+  <div class="doc-title">${escapeHtml(sop.title)}</div>
+  <div class="doc-meta">
+    ${sop.category ? `<span>类目：${escapeHtml(sop.category)}</span>` : ''}
+    ${sop.owner ? `<span>部门：${escapeHtml(sop.owner)}</span>` : ''}
+    ${sop.version ? `<span>版本：${escapeHtml(sop.version)}</span>` : ''}
+    ${sop.status ? `<span>状态：${escapeHtml(sop.status)}</span>` : ''}
+    ${sop.updatedAt ? `<span>更新：${escapeHtml(sop.updatedAt)}</span>` : ''}
+    ${sop.duration ? `<span>时长：${escapeHtml(sop.duration)}</span>` : ''}
+  </div>
+  ${sop.description ? `<div class="doc-desc">${escapeHtml(sop.description)}</div>` : ''}
+  ${sop.scenario ? `<div class="doc-desc">适用场景：${escapeHtml(sop.scenario)}</div>` : ''}
+</div>
+${tocHtml}
+${groups.map((g, i) => groupHtml(g, i + 1)).join('')}
+</body></html>`;
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 200);
+    }
+
+    async function exportSop(sop, fmt) {
+      if (!sop) return;
+      const html = buildPrintHtml(sop, fmt === 'pdf');
+      const base = (sop.title || 'sop').replace(/[\\/:*?"<>|]/g, '_');
+      if (fmt === 'html') {
+        downloadBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), `${base}.html`);
+        return;
+      }
+      if (fmt === 'word') {
+        const wordHtml = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'></head><body>${html.replace(/^[\s\S]*?<body>/i, '').replace(/<\/body>[\s\S]*$/i, '')}</body></html>`;
+        downloadBlob(new Blob([wordHtml], { type: 'application/msword' }), `${base}.doc`);
+        return;
+      }
+      if (fmt === 'pdf') {
+        // 用隐藏 iframe 加载完整 HTML，然后 html2canvas → jsPDF
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:820px;height:1200px;border:0;';
+        iframe.srcdoc = html;
+        document.body.appendChild(iframe);
+        await new Promise((r) => iframe.addEventListener('load', r, { once: true }));
+        // 等待字体和图片
+        await new Promise((r) => setTimeout(r, 300));
+        try {
+          const doc = iframe.contentDocument;
+          const target = doc.body;
+          const canvas = await window.html2canvas(target, { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 820 });
+          const imgData = canvas.toDataURL('image/jpeg', 0.92);
+          const { jsPDF } = window.jspdf;
+          const pdf = new jsPDF('p', 'mm', 'a4');
+          const pageW = pdf.internal.pageSize.getWidth();
+          const pageH = pdf.internal.pageSize.getHeight();
+          const imgW = pageW;
+          const imgH = (canvas.height * imgW) / canvas.width;
+          let heightLeft = imgH;
+          let position = 0;
+          pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
+          heightLeft -= pageH;
+          while (heightLeft > 0) {
+            position -= pageH;
+            pdf.addPage();
+            pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
+            heightLeft -= pageH;
+          }
+          pdf.save(`${base}.pdf`);
+        } catch (err) {
+          console.error(err);
+          alert('导出 PDF 失败：' + (err?.message || err));
+        } finally {
+          iframe.remove();
+        }
+      }
+    }
+
+    /* ============================================================
+     *  AiDock - 右下角悬浮 AI 助手
+     * ============================================================ */
+    const AI_CONFIG_KEY = 'logiflow-ai-cfg-v1';
+    const AI_HISTORY_KEY = 'logiflow-ai-history-v1';
+
+    function loadAiConfig() {
+      try {
+        return JSON.parse(localStorage.getItem(AI_CONFIG_KEY) || 'null') || {
+          endpoint: 'https://api.openai.com/v1/chat/completions',
+          apiKey: '',
+          model: 'gpt-4o-mini',
+        };
+      } catch (e) {
+        return { endpoint: 'https://api.openai.com/v1/chat/completions', apiKey: '', model: 'gpt-4o-mini' };
+      }
+    }
+    function saveAiConfig(cfg) { try { localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(cfg)); } catch (e) {} }
+    function loadAiHistory() { try { return JSON.parse(localStorage.getItem(AI_HISTORY_KEY) || '[]') || []; } catch (e) { return []; } }
+    function saveAiHistory(list) { try { localStorage.setItem(AI_HISTORY_KEY, JSON.stringify(list.slice(-40))); } catch (e) {} }
+
+    const AI_SYSTEM_PROMPT = `你是一个物流行业的资深 SOP 顾问，擅长梳理仓储、配送、异常处理等流程。请以简洁、结构化、可执行的中文回复用户，输出格式建议使用 Markdown（标题、列表、编号）。当用户提及具体步骤/风险/管控时，请给出可直接落到 SOP 的建议。`;
+
+    const DEMO_ANSWERS = [
+      '**建议补充「异常处理分支」**：\n\n- 数量差异 >2% → 立即冻结收货并升级到调度\n- 外包装破损 → 6 面拍照，24h 内出鉴定报告\n- 缺资料 → 挂起并联系采购补齐\n\n可以在当前判断节点的「否」分支里加上这三步。',
+      '这个操作步骤的风险点建议补充：\n\n1. **系统单据未及时冲销** → 增加日结抽查\n2. **PDA 掉线导致漏扫** → 增加"复扫复核"作为兜底动作\n3. **多人交叉操作导致责任不清** → 强制单据签名字段',
+      '为你梳理这份 SOP 的关键 KPI：\n\n- 入库准确率 ≥ 99.5%\n- 抽检合格率 ≥ 98%\n- 上架超时率 < 3%\n- 异常闭环 SLA 24h\n\n建议在 SOP 表头下方加一个"KPI 目标"块。',
+    ];
+
+    function AiDock({ sop, onClose, onInsertBelow, toast }) {
+      const [messages, setMessages] = useState(() => loadAiHistory());
+      const [input, setInput] = useState('');
+      const [busy, setBusy] = useState(false);
+      const [cfgOpen, setCfgOpen] = useState(false);
+      const [cfg, setCfg] = useState(loadAiConfig);
+      const listRef = useRef(null);
+      const abortRef = useRef(null);
+
+      useEffect(() => { saveAiHistory(messages); }, [messages]);
+      useEffect(() => {
+        if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+      }, [messages, busy]);
+
+      const contextSummary = useMemo(() => {
+        if (!sop) return '';
+        const stepBrief = (sop.steps || []).map((s, i) => {
+          if (s.type === 'action') return `- 步骤${i + 1}【操作】${s.title}｜${s.role || '-'}｜${s.time || '-'}`;
+          return `  · 判断：${s.title}（挂在 ${s.parentStepId}）`;
+        }).join('\n');
+        return `当前 SOP：${sop.title}\n类目：${sop.category || '-'}\n描述：${sop.description || '-'}\n步骤概览：\n${stepBrief || '(空)'}`;
+      }, [sop]);
+
+      const send = async () => {
+        const text = input.trim();
+        if (!text || busy) return;
+        const userMsg = { id: uid(), role: 'user', content: text, at: Date.now() };
+        setInput('');
+        setMessages((m) => [...m, userMsg]);
+        setBusy(true);
+
+        // 无 API Key 时走演示回复
+        if (!cfg.apiKey || !cfg.endpoint) {
+          const demo = DEMO_ANSWERS[Math.floor(Math.random() * DEMO_ANSWERS.length)];
+          const asstId = uid();
+          setMessages((m) => [...m, { id: asstId, role: 'assistant', content: '', at: Date.now(), demo: true }]);
+          // 逐字打字机
+          for (let i = 1; i <= demo.length; i++) {
+            await new Promise((r) => setTimeout(r, 8));
+            setMessages((m) => m.map((x) => x.id === asstId ? { ...x, content: demo.slice(0, i) } : x));
+          }
+          setBusy(false);
+          return;
+        }
+
+        const asstId = uid();
+        setMessages((m) => [...m, { id: asstId, role: 'assistant', content: '', at: Date.now() }]);
+
+        const historyForModel = [...messages, userMsg].filter((m) => m.role === 'user' || m.role === 'assistant').slice(-10).map((m) => ({ role: m.role, content: m.content }));
+
+        try {
+          abortRef.current = new AbortController();
+          const resp = await fetch(cfg.endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${cfg.apiKey}`,
+            },
+            signal: abortRef.current.signal,
+            body: JSON.stringify({
+              model: cfg.model,
+              stream: true,
+              messages: [
+                { role: 'system', content: AI_SYSTEM_PROMPT + '\n\n' + contextSummary },
+                ...historyForModel,
+              ],
+            }),
+          });
+          if (!resp.ok || !resp.body) {
+            const errText = await resp.text().catch(() => '');
+            throw new Error(`HTTP ${resp.status} ${errText.slice(0, 200)}`);
+          }
+          const reader = resp.body.getReader();
+          const dec = new TextDecoder();
+          let buf = '';
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop() || '';
+            for (const line of lines) {
+              const s = line.trim();
+              if (!s.startsWith('data:')) continue;
+              const payload = s.slice(5).trim();
+              if (!payload || payload === '[DONE]') continue;
+              try {
+                const j = JSON.parse(payload);
+                const delta = j.choices?.[0]?.delta?.content || j.choices?.[0]?.message?.content || '';
+                if (delta) setMessages((m) => m.map((x) => x.id === asstId ? { ...x, content: x.content + delta } : x));
+              } catch (e) { /* ignore */ }
+            }
+          }
+        } catch (err) {
+          setMessages((m) => m.map((x) => x.id === asstId ? { ...x, content: (x.content || '') + `\n\n**⚠️ 请求失败**：${err?.message || err}\n\n请检查 Endpoint / API Key 是否正确，或在设置里改用兼容 OpenAI 协议的接口。` } : x));
+        } finally {
+          setBusy(false);
+          abortRef.current = null;
+        }
+      };
+
+      const stop = () => { abortRef.current?.abort(); };
+      const clearHistory = () => { if (confirm('清空当前对话历史？')) setMessages([]); };
+
+      return (
+        <div className="fixed bottom-6 right-6 w-[400px] h-[560px] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col z-50 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-200 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">🤖</div>
+            <div className="flex-1">
+              <div className="font-semibold text-sm">SOP AI 助手</div>
+              <div className="text-[11px] text-blue-100">{cfg.apiKey ? `已连接 · ${cfg.model}` : '演示模式（未配置 API Key）'}</div>
+            </div>
+            <button className="text-white/70 hover:text-white text-sm" title="设置" onClick={() => setCfgOpen(true)}>⚙</button>
+            <button className="text-white/70 hover:text-white text-sm" title="清空历史" onClick={clearHistory}>🗑</button>
+            <button className="text-white/70 hover:text-white text-lg" onClick={onClose}>×</button>
+          </div>
+          <div ref={listRef} className="flex-1 overflow-y-auto sop-scroll p-4 space-y-3 bg-slate-50">
+            {messages.length === 0 && (
+              <div className="text-xs text-slate-500 space-y-2 py-6">
+                <div className="text-center text-slate-400">👋 我可以帮你</div>
+                <div className="space-y-1">
+                  {[
+                    '为「' + (sop?.title || '当前 SOP') + '」补充风险与管控措施',
+                    '把某个操作步骤拆分成更细的子步骤',
+                    '为判断节点生成"是/否"分支的具体动作',
+                    '帮我评估这份 SOP 的合规性与可执行性',
+                  ].map((q) => (
+                    <button key={q} onClick={() => setInput(q)} className="w-full text-left text-xs px-3 py-2 rounded-md bg-white hover:bg-blue-50 border border-slate-200">{q}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {messages.map((m) => (
+              <div key={m.id} className={cn('flex gap-2', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+                {m.role === 'assistant' && <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 text-xs">🤖</div>}
+                <div className={cn(
+                  'max-w-[80%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap leading-relaxed',
+                  m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-800'
+                )}>
+                  {m.content || <span className="text-slate-400 italic">生成中…</span>}
+                </div>
+              </div>
+            ))}
+            {busy && (
+              <div className="flex gap-2 items-center text-xs text-slate-500">
+                <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                <span>AI 正在思考…</span>
+                <button className="text-slate-400 hover:text-red-500 text-[11px] underline" onClick={stop}>停止</button>
+              </div>
+            )}
+          </div>
+          <div className="p-3 border-t border-slate-200 bg-white">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                rows={2}
+                placeholder="Enter 发送，Shift+Enter 换行"
+                className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 resize-none"
+              />
+              <Button onClick={send} disabled={busy || !input.trim()}>发送</Button>
+            </div>
+          </div>
+          {cfgOpen && (
+            <div className="absolute inset-0 bg-slate-900/40 flex items-center justify-center p-4 z-10">
+              <div className="w-full bg-white rounded-xl shadow-xl border border-slate-200 p-4 space-y-3">
+                <div className="text-sm font-semibold text-slate-800">AI 配置</div>
+                <div className="text-[11px] text-slate-500 leading-relaxed">
+                  兼容 OpenAI Chat Completions 协议。可配置：<br/>
+                  · OpenAI: https://api.openai.com/v1/chat/completions（model: gpt-4o-mini 等）<br/>
+                  · 火山方舟（豆包）: https://ark.cn-beijing.volces.com/api/v3/chat/completions（model: 你的接入点 ID）<br/>
+                  · Kimi/Moonshot: https://api.moonshot.cn/v1/chat/completions（model: moonshot-v1-8k 等）
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-slate-600 mb-1">Endpoint</div>
+                  <Input value={cfg.endpoint} onChange={(e) => setCfg({ ...cfg, endpoint: e.target.value })} />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-slate-600 mb-1">API Key</div>
+                  <Input type="password" value={cfg.apiKey} onChange={(e) => setCfg({ ...cfg, apiKey: e.target.value })} placeholder="sk-... 或 ep-..." />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-slate-600 mb-1">Model</div>
+                  <Input value={cfg.model} onChange={(e) => setCfg({ ...cfg, model: e.target.value })} />
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" onClick={() => setCfgOpen(false)}>取消</Button>
+                  <Button onClick={() => { saveAiConfig(cfg); setCfgOpen(false); toast?.('已保存 AI 配置', 'success'); }}>保存</Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function AiFab({ onClick }) {
+      return (
+        <button
+          onClick={onClick}
+          className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-xl hover:shadow-2xl flex items-center justify-center text-2xl z-40 pulse-ring"
+          title="打开 AI 助手"
+        >🤖</button>
+      );
+    }
+
+    /* ============================================================
+     *  BackupBar - 数据备份/恢复
+     * ============================================================ */
+    function BackupControls({ sops, onImport, toast }) {
+      const doExport = () => {
+        const blob = new Blob([JSON.stringify(sops, null, 2)], { type: 'application/json;charset=utf-8' });
+        downloadBlob(blob, `logiflow-sops-${nowDate()}.json`);
+        toast?.('已导出全部 SOP 数据', 'success');
+      };
+      const doImport = (e) => {
+        const f = e.target.files?.[0]; e.target.value = '';
+        if (!f) return;
+        const fr = new FileReader();
+        fr.onload = () => {
+          try {
+            const list = JSON.parse(fr.result);
+            if (!Array.isArray(list)) throw new Error('文件格式不正确');
+            if (!confirm(`将导入 ${list.length} 个 SOP，可能覆盖同名条目，确认继续？`)) return;
+            onImport(list);
+            toast?.(`已导入 ${list.length} 个 SOP`, 'success');
+          } catch (err) {
+            toast?.('导入失败：' + (err?.message || err), 'error');
+          }
+        };
+        fr.readAsText(f);
+      };
+      return (
+        <>
+          <Button variant="outline" size="sm" onClick={doExport} title="导出全部数据为 JSON（用于备份/迁移）">💾 备份</Button>
+          <label className="inline-flex items-center">
+            <span className="cursor-pointer text-xs px-2 py-1 border border-slate-300 rounded-md bg-white hover:bg-slate-50 text-slate-700" title="从 JSON 恢复数据">↺ 恢复</span>
+            <input type="file" accept="application/json" hidden onChange={doImport} />
+          </label>
+        </>
+      );
+    }
+
+    // <<< APPEND_ANCHOR_A >>>
+
+    /* ============================================================
+     *  App
+     * ============================================================ */
+    function App() {
+      const [sops, setSops] = useState(loadSops);
+      const [currentId, setCurrentId] = useState(() => {
+        const c = loadCurrent();
+        const list = loadSops();
+        return list.find((s) => s.id === c) ? c : (list[0]?.id || '');
+      });
+      const [selectedStepId, setSelectedStepId] = useState(null);
+      const [aiOpen, setAiOpen] = useState(false);
+      const [searchQ, setSearchQ] = useState('');
+      const [lastSaved, setLastSaved] = useState(Date.now());
+      const [savedFlash, setSavedFlash] = useState(false);
+      const toast = useToast();
+
+      useEffect(() => {
+        saveSops(sops);
+        setLastSaved(Date.now());
+        setSavedFlash(true);
+        const t = setTimeout(() => setSavedFlash(false), 1200);
+        return () => clearTimeout(t);
+      }, [sops]);
+      useEffect(() => { if (currentId) saveCurrent(currentId); }, [currentId]);
+
+      const sop = sops.find((s) => s.id === currentId);
+      const selectedStep = sop?.steps.find((x) => x.id === selectedStepId) || null;
+
+      const updateSop = (patch) => setSops((list) => list.map((s) => s.id === currentId ? { ...s, ...(typeof patch === 'function' ? patch(s) : patch) } : s));
+
+      const createSop = () => {
+        const id = uid();
+        setSops((list) => [...list, {
+          id, title: '新建 SOP', description: '', category: '', owner: '', duration: '', scenario: '', version: 'v0.1', status: '草稿', updatedAt: nowDate(), steps: [],
+        }]);
+        setCurrentId(id);
+      };
+
+      const deleteSop = (id) => {
+        setSops((list) => {
+          const nx = list.filter((s) => s.id !== id);
+          if (id === currentId) setCurrentId(nx[0]?.id || '');
+          return nx;
+        });
+      };
+
+      const importAll = (list) => {
+        const normalized = migrate(list);
+        setSops((prev) => {
+          const map = new Map(prev.map((s) => [s.id, s]));
+          for (const n of normalized) map.set(n.id, n);
+          return Array.from(map.values());
+        });
+      };
+
+      const filteredSops = useMemo(() => {
+        const q = searchQ.trim().toLowerCase();
+        if (!q) return sops;
+        return sops.filter((s) => {
+          const text = [s.title, s.description, s.category, s.owner, ...(s.steps || []).map((x) => x.title + ' ' + (x.content || ''))].join(' ').toLowerCase();
+          return text.includes(q);
+        });
+      }, [sops, searchQ]);
+
+      return (
+        <div className="h-screen flex bg-slate-50">
+          {toast.view}
+          <Sidebar sops={filteredSops} currentId={currentId} onSelect={setCurrentId} onCreate={createSop} onDelete={deleteSop} searchQ={searchQ} onSearch={setSearchQ} />
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <Header
+              sop={sop}
+              savedFlash={savedFlash}
+              lastSaved={lastSaved}
+              extra={<BackupControls sops={sops} onImport={importAll} toast={toast.push} />}
+            />
+            <div className="flex-1 flex overflow-hidden">
+              <div className="flex-1 overflow-y-auto sop-scroll p-6" id="sop-canvas">
+                {sop ? (
+                  <div className="max-w-4xl mx-auto space-y-4">
+                    <SopHeaderEditor sop={sop} onChange={(p) => updateSop(p)} />
+                    <SopOutline sop={sop} onJump={(sid) => { setSelectedStepId(sid); document.getElementById(`anchor-${sid}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} />
+                    <StepList sop={sop} selectedId={selectedStepId} onSelect={setSelectedStepId} onChange={updateSop} toast={toast.push} />
+                  </div>
+                ) : (
+                  <div className="text-center text-slate-400 mt-20">没有 SOP，点左侧「新建 SOP」开始 →</div>
+                )}
+              </div>
+              {sop && selectedStep && (
+                <StepDetailPanel key={selectedStep.id} sop={sop} step={selectedStep} onChange={updateSop} onClose={() => setSelectedStepId(null)} toast={toast.push} />
+              )}
+            </div>
+          </div>
+          {aiOpen
+            ? <AiDock sop={sop} onClose={() => setAiOpen(false)} toast={toast.push} />
+            : <AiFab onClick={() => setAiOpen(true)} />
+          }
+        </div>
+      );
+    }
+
+    /* ============================================================
+     *  更多组件将在下文追加（拖拽、步骤卡、详情面板、导出等）
+     * ============================================================ */
+    // <<< APPEND_ANCHOR_A >>>
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    document.getElementById('boot').classList.add('gone');
+    setTimeout(() => document.getElementById('boot').remove(), 400);
+  </script>
+</body>
+</html>

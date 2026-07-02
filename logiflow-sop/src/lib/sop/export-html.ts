@@ -8,6 +8,9 @@ const escapeHtml = (s: string): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+// 用户输入的多行文本：转义后把 \n 转成 <br/>，保留手动换行
+const preWrap = (s: string): string => escapeHtml(s).replace(/\n/g, '<br/>');
+
 interface Group {
   action: ActionStep;
   actionIdx: number; // 在 sop.steps 中的原索引，用于生成锚点
@@ -60,7 +63,7 @@ function renderActionBody(step: ActionStep): string {
         <h4 class="text-sm font-semibold text-sky-700 mb-2 flex items-center gap-1.5">📝 备注 <span class="text-xs font-normal text-sky-500">(${has ?? 0})</span></h4>
         ${has
           ? `<ol class="list-decimal pl-6 text-sm text-slate-700 space-y-1 whitespace-pre-wrap">
-              ${step.notes!.map((n, i) => `<li><span class="font-semibold text-sky-700 mr-1">${i + 1}.</span>${escapeHtml(n)}</li>`).join('')}
+              ${step.notes!.map((n, i) => `<li><span class="font-semibold text-sky-700 mr-1">${i + 1}.</span>${preWrap(n)}</li>`).join('')}
             </ol>`
           : `<p class="text-sm text-slate-400 italic">（未填写备注，可在属性面板添加）</p>`}
       </div>`;
@@ -77,7 +80,7 @@ function renderActionBody(step: ActionStep): string {
                   (item, i) => `
               <label class="checklist-item flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 transition cursor-pointer">
                 <input type="checkbox" class="w-5 h-5 text-blue-600 rounded border-slate-300" onchange="updateProgress()">
-                <span class="text-slate-700"><span class="font-semibold text-slate-500 mr-1">${i + 1}.</span>${escapeHtml(item)}</span>
+                <span class="text-slate-700"><span class="font-semibold text-slate-500 mr-1">${i + 1}.</span>${preWrap(item)}</span>
               </label>`,
                 )
                 .join('')}
@@ -94,7 +97,7 @@ function renderActionBody(step: ActionStep): string {
             .map((src, ii) => {
               const cap = step.imageCaptions?.[ii] ?? '';
               const capHtml = cap
-                ? `<div class="px-2 py-1.5 text-xs text-slate-600 border-t border-slate-100 bg-slate-50/70 whitespace-pre-wrap">${escapeHtml(cap)}</div>`
+                ? `<div class="px-2 py-1.5 text-xs text-slate-600 border-t border-slate-100 bg-slate-50/70 whitespace-pre-wrap">${preWrap(cap)}</div>`
                 : '';
               return `
           <figure class="block rounded-lg overflow-hidden border border-slate-200 bg-white hover:border-blue-400 transition">
@@ -122,11 +125,11 @@ function renderActionBody(step: ActionStep): string {
       : [];
   const renderList = (items: string[], cls: string): string =>
     items.length === 1
-      ? `<div class="text-sm ${cls} mt-1">${escapeHtml(items[0])}</div>`
+      ? `<div class="text-sm ${cls} mt-1">${preWrap(items[0])}</div>`
       : `<ol class="text-sm ${cls} mt-1 list-decimal list-inside space-y-0.5">${items
           .map(
             (v, i) =>
-              `<li><span class="font-semibold mr-1">${i + 1}.</span>${escapeHtml(v)}</li>`,
+              `<li><span class="font-semibold mr-1">${i + 1}.</span>${preWrap(v)}</li>`,
           )
           .join('')}</ol>`;
   const riskHtml =
@@ -150,14 +153,14 @@ function renderActionBody(step: ActionStep): string {
             ${step.substeps
               .map(
                 (s, i) =>
-                  `<li class="flex items-start gap-2 text-slate-700"><span class="shrink-0 inline-flex items-center justify-center px-2 h-6 rounded bg-blue-100 text-blue-700 text-xs font-semibold">步骤 ${i + 1}</span><span class="whitespace-pre-wrap">${escapeHtml(s)}</span></li>`,
+                  `<li class="flex items-start gap-2 text-slate-700"><span class="shrink-0 inline-flex items-center justify-center px-2 h-6 rounded bg-blue-100 text-blue-700 text-xs font-semibold">步骤 ${i + 1}</span><span class="whitespace-pre-wrap">${preWrap(s)}</span></li>`,
               )
               .join('')}
           </ol>
         </div>`
       : '';
   return `
-    <p class="text-slate-600 mb-4 leading-relaxed whitespace-pre-wrap">${escapeHtml(step.content)}</p>
+    <p class="text-slate-600 mb-4 leading-relaxed whitespace-pre-wrap">${preWrap(step.content)}</p>
     ${substepsHtml}
     <div class="grid grid-cols-2 gap-3 mb-2 text-sm">
       <div class="bg-slate-50 p-3 rounded-lg">

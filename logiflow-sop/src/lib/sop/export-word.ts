@@ -183,6 +183,7 @@ function actionStepToWordHtml(step: ActionStep, actionNo: number): string {
     ? `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注（${step.notes.length}）</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.notes.map((n, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(n)}</li>`).join('')}</ol></td></tr>`
     : `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;color:#94a3b8;font-style:italic;">（未填写备注）</td></tr>`;
   return `
+    <div style="page-break-inside:avoid;">
     <h2 id="sop-step-${actionNo}" style="background:#eff6ff;color:#1e3a8a;padding:8px 12px;border-left:4px solid #2563eb;margin-top:24px;"><a name="sop-step-${actionNo}"></a>步骤 ${actionNo}：${escapeHtml(step.title)}</h2>
     <table style="width:100%;border-collapse:collapse;font-size:14px;table-layout:fixed;">
       <colgroup><col style="width:110px;" /><col /></colgroup>
@@ -197,6 +198,7 @@ function actionStepToWordHtml(step: ActionStep, actionNo: number): string {
       ${notes}
       ${imagesBlock(step.images, '示例图片', step.imageCaptions)}
     </table>
+    </div>
   `;
 }
 
@@ -230,7 +232,7 @@ function decisionStepToWordHtml(
   };
   // 判断模块以缩进方式挂在父操作步骤下：无独立"步骤"编号，标题较小
   return `
-    <div style="margin-left:24px;margin-top:12px;border-left:3px solid #fde68a;padding-left:16px;">
+    <div style="page-break-inside:avoid;margin-left:24px;margin-top:12px;border-left:3px solid #fde68a;padding-left:16px;">
       <h3 id="sop-decision-${actionNo}-${localNo}" style="background:#fffbeb;color:#92400e;padding:6px 10px;border-radius:4px;margin:8px 0;font-size:14px;"><a name="sop-decision-${actionNo}-${localNo}"></a>判断模块 ${actionNo}.${localNo}：${escapeHtml(step.title)}</h3>
       <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
         <colgroup><col style="width:110px;" /><col /></colgroup>

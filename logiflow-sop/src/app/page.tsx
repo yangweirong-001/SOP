@@ -970,6 +970,7 @@ export default function LogiFlowEditor(): React.ReactElement {
                   (() => {
                     const groups = groupSteps(activeSop.steps);
                     let flatCounter = 0;
+                    let actionSeq = 0;
                     return groups.map((group, groupIdx) => {
                       const headFlatIdx = flatCounter;
                       const nodes = group.map((step, localIdx) => {
@@ -978,6 +979,9 @@ export default function LogiFlowEditor(): React.ReactElement {
                         return { step, flatIdx, localIdx };
                       });
                       const head = nodes[0];
+                      const headDisplayIdx =
+                        head.step.type === 'action' ? actionSeq : head.flatIdx;
+                      if (head.step.type === 'action') actionSeq += 1;
                       const decisions = nodes.slice(1);
                       const isDragging = draggingGroupIdx === groupIdx;
                       const showBefore =
@@ -1048,6 +1052,7 @@ export default function LogiFlowEditor(): React.ReactElement {
                             <StepCardView
                               step={head.step}
                               index={head.flatIdx}
+                              displayIndex={headDisplayIdx}
                               total={activeSop.steps.length}
                               selected={selectedStepId === head.step.id}
                               onSelect={() => setSelectedStepId(head.step.id)}
@@ -1343,55 +1348,60 @@ function SopOutline(props: {
       </button>
       {open && (
         <ol className="border-t border-slate-100 divide-y divide-slate-100 max-h-96 overflow-y-auto">
-          {steps.map((step, idx) => {
-            const isDecision = step.type === 'decision';
-            const selected = selectedStepId === step.id;
-            return (
-              <li key={step.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(step.id)}
-                  className={`w-full text-left flex items-start gap-3 px-5 py-2.5 hover:bg-slate-50 transition-colors ${
-                    selected ? 'bg-blue-50/60' : ''
-                  }`}
-                >
-                  <span
-                    className={`shrink-0 mt-0.5 h-6 w-6 rounded-full text-xs font-semibold flex items-center justify-center ${
-                      isDecision
-                        ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200'
-                        : 'bg-blue-100 text-blue-700 ring-1 ring-blue-200'
+          {(() => {
+            let actionSeq = 0;
+            let decisionSeq = 0;
+            return steps.map((step) => {
+              const isDecision = step.type === 'decision';
+              const displayNum = isDecision ? ++decisionSeq : ++actionSeq;
+              const selected = selectedStepId === step.id;
+              return (
+                <li key={step.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(step.id)}
+                    className={`w-full text-left flex items-start gap-3 px-5 py-2.5 hover:bg-slate-50 transition-colors ${
+                      selected ? 'bg-blue-50/60' : ''
                     }`}
                   >
-                    {idx + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div
-                      className={`text-sm font-medium truncate ${
-                        selected ? 'text-blue-700' : 'text-slate-900'
+                    <span
+                      className={`shrink-0 mt-0.5 h-6 w-6 rounded-full text-xs font-semibold flex items-center justify-center ${
+                        isDecision
+                          ? 'bg-amber-100 text-amber-700 ring-1 ring-amber-200'
+                          : 'bg-blue-100 text-blue-700 ring-1 ring-blue-200'
                       }`}
                     >
-                      {step.title || (isDecision ? '未命名判断' : '未命名步骤')}
-                    </div>
-                    {step.type === 'action' && step.role && (
-                      <div className="text-xs text-slate-500 mt-0.5 truncate">
-                        {step.role}
-                        {step.time ? ` · ${step.time}` : ''}
+                      {displayNum}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div
+                        className={`text-sm font-medium truncate ${
+                          selected ? 'text-blue-700' : 'text-slate-900'
+                        }`}
+                      >
+                        {step.title || (isDecision ? '未命名判断' : '未命名步骤')}
                       </div>
-                    )}
-                  </div>
-                  <span
-                    className={`shrink-0 mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                      isDecision
-                        ? 'bg-amber-50 text-amber-700'
-                        : 'bg-blue-50 text-blue-700'
-                    }`}
-                  >
-                    {isDecision ? '判断' : '操作'}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
+                      {step.type === 'action' && step.role && (
+                        <div className="text-xs text-slate-500 mt-0.5 truncate">
+                          {step.role}
+                          {step.time ? ` · ${step.time}` : ''}
+                        </div>
+                      )}
+                    </div>
+                    <span
+                      className={`shrink-0 mt-0.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                        isDecision
+                          ? 'bg-amber-50 text-amber-700'
+                          : 'bg-blue-50 text-blue-700'
+                      }`}
+                    >
+                      {isDecision ? '判断' : '操作'}
+                    </span>
+                  </button>
+                </li>
+              );
+            });
+          })()}
         </ol>
       )}
     </div>
@@ -1409,6 +1419,7 @@ function StepCardView(props: {
   onAddDecision?: () => void;
   nested?: boolean;
   draggable?: boolean;
+  displayIndex?: number;
 }): React.ReactElement {
   const {
     step,
@@ -1421,6 +1432,7 @@ function StepCardView(props: {
     onAddDecision,
     nested,
     draggable,
+    displayIndex,
   } = props;
   return (
     <div
@@ -1434,7 +1446,7 @@ function StepCardView(props: {
       {step.type === 'action' ? (
         <ActionCard
           step={step}
-          index={index}
+          index={displayIndex ?? index}
           selected={selected}
           onSelect={onSelect}
         >

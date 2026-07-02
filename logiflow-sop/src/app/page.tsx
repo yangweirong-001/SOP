@@ -446,6 +446,59 @@ export default function LogiFlowEditor(): React.ReactElement {
     toast.success('已保存到本地存储');
   };
 
+  const handleBackup = (): void => {
+    try {
+      const json = JSON.stringify(sops, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const a = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      a.href = url;
+      a.download = `logiflow-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`已导出 ${sops.length} 个 SOP 备份`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`导出备份失败：${msg}`);
+    }
+  };
+
+  const handleRestore = (): void => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text) as unknown;
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          toast.error('恢复失败：文件不是有效的 SOP 备份');
+          return;
+        }
+        const restored = parsed as SopDoc[];
+        if (
+          !window.confirm(
+            `将用备份中的 ${restored.length} 个 SOP 覆盖当前 ${sops.length} 个，是否继续？`,
+          )
+        ) {
+          return;
+        }
+        setSops(restored);
+        setActiveId(restored[0].id);
+        setSelectedStepId(null);
+        toast.success(`已恢复 ${restored.length} 个 SOP`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast.error(`恢复失败：${msg}`);
+      }
+    };
+    input.click();
+  };
+
   const handleExportHtml = (): void => {
     downloadHtml(activeSop);
     toast.success('已开始导出 HTML');
@@ -721,6 +774,21 @@ export default function LogiFlowEditor(): React.ReactElement {
                 <div className="flex flex-col">
                   <span>导出为 PDF</span>
                   <span className="text-xs text-slate-500">打印预览另存</span>
+                </div>
+              </DropdownMenuItem>
+              <div className="my-1 h-px bg-slate-200" />
+              <DropdownMenuItem onSelect={handleBackup} className="gap-2 cursor-pointer">
+                <FileDown className="h-4 w-4 text-emerald-600" />
+                <div className="flex flex-col">
+                  <span>备份全部为 JSON</span>
+                  <span className="text-xs text-slate-500">导出所有 SOP</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleRestore} className="gap-2 cursor-pointer">
+                <FileText className="h-4 w-4 text-amber-600" />
+                <div className="flex flex-col">
+                  <span>从 JSON 恢复</span>
+                  <span className="text-xs text-slate-500">导入备份文件</span>
                 </div>
               </DropdownMenuItem>
             </DropdownMenuContent>

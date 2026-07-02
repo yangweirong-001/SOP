@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { FieldLabel } from './FieldLabel';
 
 export function SubstepsEditor(props: {
@@ -83,11 +83,12 @@ export function SubstepsEditor(props: {
               <span className="shrink-0 mt-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
                 {i + 1}
               </span>
-              <Input
+              <Textarea
                 value={s}
-                placeholder={`第 ${i + 1} 步操作…`}
+                placeholder={`第 ${i + 1} 步操作…（可按回车换行）`}
                 onChange={(e) => updateAt(i, e.target.value)}
-                className="flex-1"
+                className="flex-1 min-h-[36px] resize-y text-sm leading-relaxed whitespace-pre-wrap"
+                rows={Math.max(1, (s.match(/\n/g)?.length ?? 0) + 1)}
               />
               <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition">
                 <button

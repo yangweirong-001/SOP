@@ -11,6 +11,10 @@ const escapeHtml = (s: string): string =>
 // 用户输入的多行文本：转义后把 \n 转成 <br/>，保留手动换行
 const preWrap = (s: string): string => escapeHtml(s).replace(/\n/g, '<br/>');
 
+// 剥掉用户手动写在开头的编号（1. / 1、/ 1) / 一、 等），避免与系统自动加的编号重复
+const stripLeadingNumber = (s: string): string =>
+  s.replace(/^[\s\u3000]*(?:\d+|[一二三四五六七八九十百千]+)[.．、)）]\s*/, '');
+
 interface Group {
   action: ActionStep;
   actionIdx: number; // 在 sop.steps 中的原索引，用于生成锚点
@@ -63,7 +67,7 @@ function renderActionBody(step: ActionStep): string {
         <h4 class="text-sm font-semibold text-sky-700 mb-2 flex items-center gap-1.5">📝 备注 <span class="text-xs font-normal text-sky-500">(${has ?? 0})</span></h4>
         ${has
           ? `<ol class="list-decimal pl-6 text-sm text-slate-700 space-y-1 whitespace-pre-wrap">
-              ${step.notes!.map((n, i) => `<li><span class="font-semibold text-sky-700 mr-1">${i + 1}.</span>${preWrap(n)}</li>`).join('')}
+              ${step.notes!.map((n, i) => `<li><span class="font-semibold text-sky-700 mr-1">${i + 1}.</span>${preWrap(stripLeadingNumber(n))}</li>`).join('')}
             </ol>`
           : `<p class="text-sm text-slate-400 italic">（未填写备注，可在属性面板添加）</p>`}
       </div>`;
@@ -80,7 +84,7 @@ function renderActionBody(step: ActionStep): string {
                   (item, i) => `
               <label class="checklist-item flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 transition cursor-pointer">
                 <input type="checkbox" class="w-5 h-5 text-blue-600 rounded border-slate-300" onchange="updateProgress()">
-                <span class="text-slate-700"><span class="font-semibold text-slate-500 mr-1">${i + 1}.</span>${preWrap(item)}</span>
+                <span class="text-slate-700"><span class="font-semibold text-slate-500 mr-1">${i + 1}.</span>${preWrap(stripLeadingNumber(item))}</span>
               </label>`,
                 )
                 .join('')}
@@ -125,11 +129,11 @@ function renderActionBody(step: ActionStep): string {
       : [];
   const renderList = (items: string[], cls: string): string =>
     items.length === 1
-      ? `<div class="text-sm ${cls} mt-1">${preWrap(items[0])}</div>`
+      ? `<div class="text-sm ${cls} mt-1">${preWrap(stripLeadingNumber(items[0]))}</div>`
       : `<ol class="text-sm ${cls} mt-1 list-decimal list-inside space-y-0.5">${items
           .map(
             (v, i) =>
-              `<li><span class="font-semibold mr-1">${i + 1}.</span>${preWrap(v)}</li>`,
+              `<li><span class="font-semibold mr-1">${i + 1}.</span>${preWrap(stripLeadingNumber(v))}</li>`,
           )
           .join('')}</ol>`;
   const riskHtml =
@@ -153,7 +157,7 @@ function renderActionBody(step: ActionStep): string {
             ${step.substeps
               .map(
                 (s, i) =>
-                  `<li class="flex items-start gap-2 text-slate-700"><span class="shrink-0 inline-flex items-center justify-center px-2 h-6 rounded bg-blue-100 text-blue-700 text-xs font-semibold">步骤 ${i + 1}</span><span class="whitespace-pre-wrap">${preWrap(s)}</span></li>`,
+                  `<li class="flex items-start gap-2 text-slate-700"><span class="shrink-0 inline-flex items-center justify-center px-2 h-6 rounded bg-blue-100 text-blue-700 text-xs font-semibold">步骤 ${i + 1}</span><span class="whitespace-pre-wrap">${preWrap(stripLeadingNumber(s))}</span></li>`,
               )
               .join('')}
           </ol>
@@ -212,7 +216,7 @@ function renderDecisionBlock(d: DecisionStep, localNo: number, anchor: string): 
           .map(
             (s, i) => `<li class="flex items-start gap-2 text-sm">
               <span class="shrink-0 inline-flex items-center justify-center px-2 h-5 rounded ${num} text-xs font-semibold mt-0.5">步骤 ${i + 1}</span>
-              <span class="flex-1 whitespace-pre-wrap">${escapeHtml(s || `第 ${i + 1} 步操作`)}</span>
+              <span class="flex-1 whitespace-pre-wrap">${preWrap(stripLeadingNumber(s || `第 ${i + 1} 步操作`))}</span>
             </li>`,
           )
           .join('')}
@@ -220,7 +224,7 @@ function renderDecisionBlock(d: DecisionStep, localNo: number, anchor: string): 
     </div>`;
   };
   return `
-  <div id="${anchor}" class="ml-4 md:ml-8 relative pl-5 mt-4 scroll-mt-4 before:content-[''] before:absolute before:left-0 before:top-3 before:bottom-3 before:w-0.5 before:bg-amber-200 before:rounded-full">
+  <div id="${anchor}" data-pdf-block="1" class="pdf-block ml-4 md:ml-8 relative pl-5 mt-4 scroll-mt-4 before:content-[''] before:absolute before:left-0 before:top-3 before:bottom-3 before:w-0.5 before:bg-amber-200 before:rounded-full" style="page-break-inside:avoid;break-inside:avoid;">
     <div class="rounded-xl bg-amber-50/70 border border-amber-200 p-5">
       <div class="flex items-center gap-2 mb-3">
         <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">⑂</span>
@@ -246,7 +250,7 @@ export function buildExportHtml(sop: SopDoc): string {
       const actionHtml =
         g.actionNo > 0
           ? `
-      <div id="${actionAnchor}" class="step-card bg-white rounded-xl border-l-4 border-blue-500 shadow-sm p-6 scroll-mt-4">
+      <div id="${actionAnchor}" data-pdf-block="1" class="pdf-block step-card bg-white rounded-xl border-l-4 border-blue-500 shadow-sm p-6 scroll-mt-4" style="page-break-inside:avoid;break-inside:avoid;">
         <div class="flex items-start gap-4">
           <div class="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xl shrink-0">${g.actionNo}</div>
           <div class="flex-1">
@@ -261,7 +265,8 @@ export function buildExportHtml(sop: SopDoc): string {
           renderDecisionBlock(it.d, it.localNo, `step-${g.actionNo}-d${it.localNo}`),
         )
         .join('');
-      return actionHtml + decisionsHtml;
+      // 把操作步骤 + 归属它的判断节点，包成一个不可分页的整体
+      return `<div class="pdf-group" style="page-break-inside:avoid;break-inside:avoid;">${actionHtml + decisionsHtml}</div>`;
     })
     .join('\n');
 

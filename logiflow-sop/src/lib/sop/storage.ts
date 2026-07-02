@@ -8,6 +8,10 @@ const ACTIVE_KEY = 'logiflow_active_sop_v1';
 
 /** 数据迁移：risks/controls 数组化 + DecisionStep 挂载到前一个 ActionStep */
 function migrateSteps(sop: SopDoc): SopDoc {
+  // 先收集本 SOP 里所有有效的 ActionStep id
+  const actionIds = new Set(
+    sop.steps.filter((s) => s.type === 'action').map((s) => s.id),
+  );
   let lastActionId: number | undefined;
   const steps = sop.steps.map((s) => {
     if (s.type === 'action') {
@@ -24,9 +28,11 @@ function migrateSteps(sop: SopDoc): SopDoc {
       return { ...step, risks, controls };
     }
     const dec = s as DecisionStep;
-    if (dec.parentStepId != null) return dec;
-    // 悬空判断节点：自动挂到最近的 ActionStep
-    return { ...dec, parentStepId: lastActionId };
+    // parentStepId 缺失，或指向不存在的 ActionStep → 自动挂到最近的 ActionStep
+    if (dec.parentStepId == null || !actionIds.has(dec.parentStepId)) {
+      return { ...dec, parentStepId: lastActionId };
+    }
+    return dec;
   });
   return { ...sop, steps };
 }

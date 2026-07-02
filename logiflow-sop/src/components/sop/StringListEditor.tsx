@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { FieldLabel } from './FieldLabel';
 
@@ -24,10 +24,10 @@ export function StringListEditor(props: {
         ? 'bg-sky-100 text-sky-600'
         : 'bg-slate-100 text-slate-600';
   const inputCls = isDanger
-    ? 'bg-white border-red-200 focus-visible:ring-red-400 h-8 text-sm'
+    ? 'bg-white border-red-200 focus-visible:ring-red-400 min-h-[36px] resize-y text-sm leading-relaxed whitespace-pre-wrap'
     : isInfo
-      ? 'bg-white border-sky-200 focus-visible:ring-sky-400 h-8 text-sm'
-      : 'bg-white h-8 text-sm';
+      ? 'bg-white border-sky-200 focus-visible:ring-sky-400 min-h-[36px] resize-y text-sm leading-relaxed whitespace-pre-wrap'
+      : 'bg-white min-h-[36px] resize-y text-sm leading-relaxed whitespace-pre-wrap';
   const btnCls = isDanger
     ? 'text-red-600 hover:text-red-700 hover:bg-red-100 -ml-2 gap-1'
     : isInfo
@@ -52,25 +52,26 @@ export function StringListEditor(props: {
       </FieldLabel>
       <div className="space-y-2">
         {items.map((item, i) => (
-          <div key={i} className="flex items-center gap-2">
+          <div key={i} className="flex items-start gap-2">
             <span
               className={cn(
-                'shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-semibold',
+                'shrink-0 mt-2 inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-semibold',
                 bulletCls,
               )}
             >
               {i + 1}
             </span>
-            <Input
+            <Textarea
               value={item}
               onChange={(e) => update(i, e.target.value)}
               className={cn('flex-1', inputCls)}
               placeholder={placeholder}
+              rows={Math.max(1, (item.match(/\n/g)?.length ?? 0) + 1)}
             />
             <button
               type="button"
               onClick={() => remove(i)}
-              className="text-slate-400 hover:text-red-500"
+              className="shrink-0 mt-1.5 text-slate-400 hover:text-red-500"
               aria-label="移除"
             >
               <X className="w-4 h-4" />

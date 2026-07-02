@@ -163,7 +163,10 @@ function actionStepToWordHtml(step: ActionStep, actionNo: number): string {
     items.length === 1
       ? preWrap(items[0])
       : `<ol style="margin:0;padding-left:22px;">${items
-          .map((c) => `<li>${preWrap(c)}</li>`)
+          .map(
+            (c, i) =>
+              `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(c)}</li>`,
+          )
           .join('')}</ol>`;
   const risk =
     risksArr.length > 0
@@ -174,10 +177,10 @@ function actionStepToWordHtml(step: ActionStep, actionNo: number): string {
       ? `<tr><td style="padding:6px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-weight:bold;vertical-align:top;">管控措施（${controlsArr.length}）</td><td style="padding:6px;border:1px solid #fecaca;background:#fff;">${listHtml(controlsArr)}</td></tr>`
       : '';
   const checklist = step.checklist?.length
-    ? `<tr><td style="padding:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:bold;vertical-align:top;">检查清单（${step.checklist.length}）</td><td style="padding:6px;border:1px solid #a7f3d0;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.checklist.map((c) => `<li>${escapeHtml(c)}</li>`).join('')}</ol></td></tr>`
+    ? `<tr><td style="padding:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:bold;vertical-align:top;">检查清单（${step.checklist.length}）</td><td style="padding:6px;border:1px solid #a7f3d0;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.checklist.map((c, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${escapeHtml(c)}</li>`).join('')}</ol></td></tr>`
     : `<tr><td style="padding:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:bold;vertical-align:top;">检查清单</td><td style="padding:6px;border:1px solid #a7f3d0;background:#fff;color:#94a3b8;font-style:italic;">（未填写检查清单）</td></tr>`;
   const notes = step.notes?.length
-    ? `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注（${step.notes.length}）</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.notes.map((n) => `<li>${preWrap(n)}</li>`).join('')}</ol></td></tr>`
+    ? `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注（${step.notes.length}）</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.notes.map((n, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(n)}</li>`).join('')}</ol></td></tr>`
     : `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;color:#94a3b8;font-style:italic;">（未填写备注）</td></tr>`;
   return `
     <h2 id="sop-step-${actionNo}" style="background:#eff6ff;color:#1e3a8a;padding:8px 12px;border-left:4px solid #2563eb;margin-top:24px;"><a name="sop-step-${actionNo}"></a>步骤 ${actionNo}：${escapeHtml(step.title)}</h2>

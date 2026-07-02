@@ -82,35 +82,46 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
       iwin.requestAnimationFrame(() => resolve(null)),
     );
 
-    // 6. html2canvas 抓 iframe 内的 body（Tailwind 变量进不来）
-    const canvas = await html2canvas(idoc.body, {
-      scale: 2,
-      useCORS: true,
-      allowTaint: false,
-      backgroundColor: '#ffffff',
-      logging: false,
-      windowWidth: 794,
-      width: 794,
-      height: scrollHeight,
-      // 让 html2canvas 使用 iframe 里的 window 计算样式
-      foreignObjectRendering: false,
-    });
-
-    // 7. jsPDF 分页
+    // 6. jsPDF 分页参数
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
     const pdfWidth = pdf.internal.pageSize.getWidth(); // 210
     const pdfHeight = pdf.internal.pageSize.getHeight(); // 297
     const margin = 8;
     const contentWidth = pdfWidth - margin * 2; // 194
     const contentHeight = pdfHeight - margin * 2; // 281
+    const pxPerMm = 794 / pdfWidth; // html2canvas 像素 → PDF 毫米
 
-    const imgWidth = contentWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    // 7. 收集"不可切割块"（每个步骤/判断节点）+ 其余元素，逐块渲染
+    //    这样 html2canvas 不会把单个步骤切成两半
+    const blocks = Array.from(
+      idoc.body.querySelectorAll<HTMLElement>('[data-pdf-block]'),
+    );
+    const bodyChildren = Array.from(idoc.body.children) as HTMLElement[];
 
-    if (imgHeight <= contentHeight) {
-      pdf.addImage(imgData, 'JPEG', margin, margin, imgWidth, imgHeight, undefined, 'FAST');
-    } else {
+    // 渲染单个元素为 canvas
+    const renderEl = async (el: HTMLElement) => {
+      const rect = el.getBoundingClientRect();
+      return html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: '#ffffff',
+        logging: false,
+        windowWidth: 794,
+        width: 794,
+        height: Math.ceil(rect.height),
+        scrollY: -rect.top,
+        scrollX: 0,
+        foreignObjectRendering: false,
+      });
+    };
+
+    // 把单个 canvas 写入 PDF（可能跨页，但只在块之间分页）
+    const writeCanvas = (cv: HTMLCanvasElement) => {
+      const imgWidth = contentWidth;
+      const imgHeight = (cv.height * imgWidth) / cv.width;
+      const imgData = cv.toDataURL('image/jpeg', 0.92);
+
       let heightLeft = imgHeight;
       let position = margin;
       pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
@@ -120,6 +131,34 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
         pdf.addPage();
         pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
         heightLeft -= contentHeight;
+      }
+    };
+
+    // 当前页剩余高度
+    let pageUsed = 0;
+    const addPageIfNeeded = (needMm: number) => {
+      if (pageUsed + needMm > contentHeight && pageUsed > 0) {
+        pdf.addPage();
+        pageUsed = 0;
+      }
+    };
+
+    // 把 body 直接子元素按"是否 data-pdf-block"分组，逐块渲染
+    for (const child of bodyChildren) {
+      if (child.hasAttribute('data-pdf-block')) {
+        // 不可切割块：单独渲染
+        const cv = await renderEl(child);
+        const blockMm = (cv.height * contentWidth) / cv.width;
+        addPageIfNeeded(blockMm);
+        writeCanvas(cv);
+        pageUsed += blockMm;
+      } else {
+        // 普通元素（目录、标题等）：整段渲染
+        const cv = await renderEl(child);
+        const blockMm = (cv.height * contentWidth) / cv.width;
+        addPageIfNeeded(blockMm);
+        writeCanvas(cv);
+        pageUsed += blockMm;
       }
     }
 

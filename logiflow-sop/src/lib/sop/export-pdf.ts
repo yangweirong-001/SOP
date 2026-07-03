@@ -4,19 +4,20 @@ import type { SopDoc } from './types';
 import { buildPrintHtml } from './export-word';
 
 /**
- * PDF 一键下载（html2canvas + jsPDF + 长图切片分页）
+ * PDF 一键下载（html2canvas + jsPDF + 单页超长 PDF）
  *
  * 核心策略：
  *  1. 用 buildPrintHtml 生成与 Word 视觉一致的 HTML（同一份 CSS）
- *  2. 用 html2canvas 抓取整个 body 成 **一张长 canvas**（不再逐块）
- *  3. jsPDF 按 A4 内容区高度 **连续切片**，每一页都紧贴上下页
+ *  2. 用 html2canvas 抓取整个 body 成 **一张长 canvas**
+ *  3. jsPDF 以 **A4 宽 × 内容全高** 作为单页尺寸生成 PDF —— 全部内容合并为一张单页
  *
- * 相比"逐块渲染紧凑排布"：
- *  - ✅ 彻底消灭空白页（长图连续切，没有换页留白）
+ * 相比"A4 分页切片"：
+ *  - ✅ 单页超长：无换页 → 无空白页 → 无文字被截断
  *  - ✅ 版式与 Word 完全一致（共用 buildPrintHtml）
  *  - ✅ 一键下载 .pdf 文件（不弹打印对话框）
- *  - ⚠️ 由于 html2canvas 不识别 CSS page-break，页尾可能切到某一行的中间；
- *      已通过较大 line-height（1.6）和表格 padding（8px）降低视觉冲击。
+ *  - 📖 PDF 阅读器里像看长网页一样滚动，观感连续
+ *  - ⚠️ 单页超长 PDF 不适合直接打印（打印机需要按 A4 分页），只适合屏幕阅读
+ *  - ⚠️ 若内容极长超过 jsPDF 单页 5000mm 上限，会自动降级为 A4 分页
  *
  * html2canvas / jspdf 走动态 import，只在用户点击时按需加载。
  */
@@ -109,41 +110,53 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
       foreignObjectRendering: false,
     });
 
-    // 6. jsPDF：A4 + Word 一致的 2cm 边距
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    const pdfWidth = pdf.internal.pageSize.getWidth(); // 210
-    const pdfHeight = pdf.internal.pageSize.getHeight(); // 297
-    const margin = 20; // 与 Word 版式一致
-    const contentWidth = pdfWidth - margin * 2; // 170
-    const contentHeight = pdfHeight - margin * 2; // 257
+    // 6. 单页超长 PDF：宽度 A4，高度 = 全部内容 + 上下 margin，永不切断
+    //    优点：无分页 → 无空白页 → 无文字截断，屏幕滚动阅读最舒服
+    //    兜底：若内容超出 jsPDF 单页 5000mm 上限，降级为 A4 长图切片分页
+    const A4_WIDTH_MM = 210;
+    const margin = 20;
+    const contentWidth = A4_WIDTH_MM - margin * 2; // 170
 
-    // 7. 按 contentWidth 缩放整张长图后的整体高度
+    // 图片按 contentWidth 缩放
     const imgWidth = contentWidth;
     const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
+    // 目标 PDF 单页高度（含上下 margin）
+    const singlePageHeight = imgHeight + margin * 2;
+    const MAX_SINGLE_PAGE_MM = 5000; // jsPDF 单页最大高度限制
+
     const imgData = canvas.toDataURL('image/jpeg', 0.92);
 
-    // 8. 长图切片分页：
-    //    每一页都 addImage 整张图，通过 y 负偏移让不同段落露在当前页内容区。
-    //    页面切换处内容连续无间隙，彻底消灭空白页。
-    let heightLeft = imgHeight;
-    let y = margin; // 第 1 页：图片顶端对齐 margin
+    if (singlePageHeight <= MAX_SINGLE_PAGE_MM) {
+      // ✅ 主路径：单页超长 PDF（无切断、无空白页）
+      const pdf = new jsPDF({
+        unit: 'mm',
+        format: [A4_WIDTH_MM, singlePageHeight],
+        orientation: 'portrait',
+      });
+      pdf.addImage(
+        imgData,
+        'JPEG',
+        margin,
+        margin,
+        imgWidth,
+        imgHeight,
+        undefined,
+        'FAST',
+      );
+      pdf.save(`${sanitizeFilename(sop.title)}.pdf`);
+    } else {
+      // ⚠️ 兜底：超长内容降级为 A4 分页（长图切片）
+      const pdf = new jsPDF({
+        unit: 'mm',
+        format: 'a4',
+        orientation: 'portrait',
+      });
+      const pdfHeight = pdf.internal.pageSize.getHeight(); // 297
+      const contentHeight = pdfHeight - margin * 2; // 257
 
-    pdf.addImage(
-      imgData,
-      'JPEG',
-      margin,
-      y,
-      imgWidth,
-      imgHeight,
-      undefined,
-      'FAST',
-    );
-    heightLeft -= contentHeight;
-
-    while (heightLeft > 0) {
-      y -= contentHeight; // 把整张长图上移 contentHeight，露出下一段
-      pdf.addPage();
+      let heightLeft = imgHeight;
+      let y = margin;
       pdf.addImage(
         imgData,
         'JPEG',
@@ -155,9 +168,23 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
         'FAST',
       );
       heightLeft -= contentHeight;
+      while (heightLeft > 0) {
+        y -= contentHeight;
+        pdf.addPage();
+        pdf.addImage(
+          imgData,
+          'JPEG',
+          margin,
+          y,
+          imgWidth,
+          imgHeight,
+          undefined,
+          'FAST',
+        );
+        heightLeft -= contentHeight;
+      }
+      pdf.save(`${sanitizeFilename(sop.title)}.pdf`);
     }
-
-    pdf.save(`${sanitizeFilename(sop.title)}.pdf`);
   } finally {
     if (iframe.parentNode) {
       iframe.parentNode.removeChild(iframe);

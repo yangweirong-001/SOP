@@ -4,212 +4,135 @@ import type { SopDoc } from './types';
 import { buildPrintHtml } from './export-word';
 
 /**
- * 真·PDF 导出：使用隐藏 iframe (srcdoc) 完全隔离 Tailwind 4 的
- * oklch()/lab() 色彩变量，再用 html2canvas 抓 iframe 内文档、
- * jsPDF 分页成 A4 PDF 后直接触发下载，不走浏览器打印预览。
+ * 真·PDF 导出（浏览器打印引擎方案）
  *
- * html2canvas / jspdf 使用动态 import，把它们从主 bundle 中剔除，
- * 只在用户点"导出 PDF"时才按需加载。
+ * 用系统级 PDF 引擎渲染，生成的是**真文字 PDF**：
+ *  - 文字可复制、可搜索、无像素失真
+ *  - 版式与 Word 100% 一致（因为共用同一份 buildPrintHtml）
+ *  - 图片矢量嵌入，比 html2canvas 截图清晰
+ *
+ * 用户操作路径：
+ *  点「导出 PDF」→ 新窗口 → 系统打印对话框自动弹出 → 目的地选「另存为 PDF」→ 保存
  */
 export async function exportPdf(sop: SopDoc): Promise<void> {
-  // 按需加载 PDF 相关依赖（首次调用时才会去拉两个 chunk）
-  const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
-    import('html2canvas'),
-    import('jspdf'),
-  ]);
+  if (typeof window === 'undefined') return;
 
-  const html = buildPrintHtml(sop);
+  const html = injectPrintTip(buildPrintHtml(sop));
 
-  // buildPrintHtml body 有 40px×44px 内边距，iframe 宽度 720px 时：
-  //   内容宽 = 720 - 44*2 = 632px ≈ 16.7cm，与 Word A4 2cm 边距 (17cm 内容宽) 几乎一致。
-  // PDF 单页内容宽 = 210 - 20*2 = 170mm，1px≈0.264mm，图打进 PDF 无明显放大失真。
-  const IFRAME_WIDTH_PX = 720;
-
-  // 1. 造一个隐藏 iframe（srcdoc 与父页面同源但样式完全隔离）
-  const iframe = document.createElement('iframe');
-  iframe.style.position = 'fixed';
-  iframe.style.left = '-99999px';
-  iframe.style.top = '0';
-  iframe.style.width = `${IFRAME_WIDTH_PX}px`;
-  iframe.style.height = '10px';
-  iframe.style.border = '0';
-  iframe.style.zIndex = '-1';
-  iframe.setAttribute('data-pdf-iframe', '1');
-  iframe.setAttribute('aria-hidden', 'true');
-  document.body.appendChild(iframe);
-
-  try {
-    // 2. 用 srcdoc 装载自包含 HTML，等 load 完成
-    await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(
-        () => reject(new Error('iframe 加载超时')),
-        15000,
-      );
-      iframe.addEventListener(
-        'load',
-        () => {
-          window.clearTimeout(timer);
-          resolve();
-        },
-        { once: true },
-      );
-      iframe.srcdoc = html;
-    });
-
-    const idoc = iframe.contentDocument;
-    const iwin = iframe.contentWindow;
-    if (!idoc || !idoc.body || !iwin) {
-      throw new Error('无法访问 iframe 内容文档');
-    }
-
-    // 3. 补一层兜底：万一有 oklch/lab 漏进来的场景，
-    //    在 iframe 里注入一段强制回退样式（正常情况下不生效，只是防御）
-    const fallback = idoc.createElement('style');
-    fallback.textContent = `
-      /* PDF 导出兜底：显式回退颜色，防止残留 oklch/lab 变量 */
-      html, body { background: #ffffff !important; color: #0f172a !important; }
-    `;
-    idoc.head.appendChild(fallback);
-
-    // 4. 等 iframe 内所有图片就绪
-    await waitForImages(idoc.body);
-    await new Promise((resolve) =>
-      iwin.requestAnimationFrame(() => resolve(null)),
+  const win = window.open('', '_blank', 'width=1000,height=1100');
+  if (!win) {
+    alert(
+      '浏览器阻止了新窗口，请在地址栏右侧允许弹窗后重试。\n\n或直接使用浏览器菜单 → 打印 → 目的地选「另存为 PDF」。',
     );
-
-    // 5. iframe 高度撑到内容全高，防止 html2canvas 截不到底
-    const scrollHeight = Math.max(
-      idoc.body.scrollHeight,
-      idoc.documentElement.scrollHeight,
-    );
-    iframe.style.height = `${scrollHeight + 40}px`;
-    await new Promise((resolve) =>
-      iwin.requestAnimationFrame(() => resolve(null)),
-    );
-
-    // 6. jsPDF 分页参数（与 Word A4 2cm 边距完全对齐：210 - 20*2 = 170mm）
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    const pdfWidth = pdf.internal.pageSize.getWidth(); // 210
-    const pdfHeight = pdf.internal.pageSize.getHeight(); // 297
-    const margin = 20; // 与 Word 版式一致
-    const contentWidth = pdfWidth - margin * 2; // 170
-    const contentHeight = pdfHeight - margin * 2; // 257
-
-    // 7. 逐块渲染 body 的直接子元素，紧凑排布，避免"每块单独一页"造成大量空白
-    const bodyChildren = Array.from(idoc.body.children) as HTMLElement[];
-
-    // 渲染单个元素为 canvas
-    const renderEl = async (el: HTMLElement) => {
-      const rect = el.getBoundingClientRect();
-      return html2canvas(el, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        backgroundColor: '#ffffff',
-        logging: false,
-        windowWidth: IFRAME_WIDTH_PX,
-        width: IFRAME_WIDTH_PX,
-        height: Math.ceil(rect.height),
-        scrollY: -rect.top,
-        scrollX: 0,
-        foreignObjectRendering: false,
-      });
-    };
-
-    // 当前页已经用掉的高度（单位 mm），控制多块紧凑排布
-    let pageUsed = 0;
-
-    // 把单个 canvas 按当前 pageUsed 位置写入 PDF；如果放不下则智能换页
-    const writeCanvasSmart = (cv: HTMLCanvasElement) => {
-      const imgWidth = contentWidth;
-      const imgHeight = (cv.height * imgWidth) / cv.width;
-      const imgData = cv.toDataURL('image/jpeg', 0.92);
-
-      // Case A：块比整页小 -> 若当前页放得下就紧接上一块画；放不下就换页并放到新页顶部
-      if (imgHeight <= contentHeight) {
-        if (pageUsed > 0 && pageUsed + imgHeight > contentHeight) {
-          pdf.addPage();
-          pageUsed = 0;
-        }
-        const y = margin + pageUsed;
-        pdf.addImage(imgData, 'JPEG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
-        pageUsed += imgHeight;
-        // 极端情况：几乎填满时也算作"页快满了"，避免下次紧贴时越界
-        if (pageUsed >= contentHeight - 1) {
-          pdf.addPage();
-          pageUsed = 0;
-        }
-        return;
-      }
-
-      // Case B：块超长（大于整页） -> 独占页，从当前页顶端开始切分渲染
-      if (pageUsed > 0) {
-        pdf.addPage();
-        pageUsed = 0;
-      }
-      let position = margin; // 首次落在页顶
-      let heightLeft = imgHeight;
-      pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
-      heightLeft -= contentHeight;
-      while (heightLeft > 0) {
-        position -= contentHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
-        heightLeft -= contentHeight;
-      }
-      // 最后一页最上方用掉的高度 = imgHeight - N*contentHeight 的余量
-      const usedOnLastPage = imgHeight - Math.floor(imgHeight / contentHeight) * contentHeight;
-      pageUsed = usedOnLastPage < contentHeight ? usedOnLastPage : 0;
-    };
-
-    // 把 body 直接子元素逐块渲染并紧凑排布
-    for (const child of bodyChildren) {
-      const cv = await renderEl(child);
-      writeCanvasSmart(cv);
-    }
-
-    pdf.save(`${sanitizeFilename(sop.title)}.pdf`);
-  } finally {
-    if (iframe.parentNode) {
-      iframe.parentNode.removeChild(iframe);
-    }
+    return;
   }
+
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+
+  // 等图片加载完毕再触发打印，避免图片未加载出来变空白
+  await waitForImagesInWindow(win);
+
+  // 触发系统打印对话框：用户在其中选择「另存为 PDF」
+  win.focus();
+  // 微延迟一帧，确保 DOM 布局完成
+  win.setTimeout(() => {
+    try {
+      win.print();
+    } catch {
+      // 部分浏览器策略下会抛异常，忽略即可，用户可以点顶部按钮再次触发
+    }
+  }, 200);
 }
 
-function waitForImages(root: HTMLElement, timeoutMs = 5000): Promise<void> {
-  const imgs = Array.from(root.querySelectorAll('img'));
-  if (imgs.length === 0) return Promise.resolve();
-  return new Promise((resolve) => {
-    let done = 0;
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      resolve();
-    };
-    const timer = window.setTimeout(finish, timeoutMs);
-    const check = () => {
-      if (done >= imgs.length) {
-        window.clearTimeout(timer);
-        finish();
+/**
+ * 在打印 HTML 的 head/body 里注入一个顶部提示条：
+ *  - 屏幕预览时显示，告诉用户如何选「另存为 PDF」+ 关闭页眉页脚
+ *  - `@media print` 时自动隐藏，不会出现在最终 PDF 里
+ */
+function injectPrintTip(html: string): string {
+  const tipStyle = `
+    <style>
+      .__pdf_tip__ {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+        padding: 14px 24px;
+        background: linear-gradient(90deg, #2563eb, #4f46e5);
+        color: #fff;
+        font: 14px/1.6 "Microsoft YaHei", "PingFang SC", -apple-system, sans-serif;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
       }
-    };
-    imgs.forEach((img) => {
-      if (img.complete && img.naturalHeight !== 0) {
-        done += 1;
-        check();
+      .__pdf_tip__ b { color: #fde68a; }
+      .__pdf_tip__ ol { margin: 6px 0 0 22px; padding: 0; }
+      .__pdf_tip__ ol li { margin: 2px 0; }
+      .__pdf_tip__ .actions { margin-top: 6px; }
+      .__pdf_tip__ .btn {
+        display: inline-block; margin-right: 8px; padding: 4px 12px;
+        background: #ffffff; color: #2563eb; border-radius: 4px;
+        cursor: pointer; font-weight: bold; font-size: 13px;
+        border: 0;
+      }
+      .__pdf_tip__ .btn-ghost {
+        background: transparent; color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.6);
+      }
+      body.__pdf__ { padding-top: 130px !important; }
+      @media print {
+        .__pdf_tip__ { display: none !important; }
+        body.__pdf__ { padding-top: 0 !important; }
+      }
+    </style>
+  `;
+  const tipDiv = `
+    <div class="__pdf_tip__" id="__pdf_tip__">
+      💡 <b>另存为 PDF 步骤（跟 Word 版式完全一致的真文字 PDF）</b>
+      <ol>
+        <li>「目的地」选择 <b>另存为 PDF</b>（Save as PDF）</li>
+        <li>「更多设置」→ 取消勾选 <b>页眉和页脚</b>（去掉浏览器自动加的日期/URL/页码）</li>
+        <li>点「保存」→ 完成 ✅</li>
+      </ol>
+      <div class="actions">
+        <button class="btn" onclick="window.print()">🖨️ 再次打开打印对话框</button>
+        <button class="btn btn-ghost" onclick="var el=document.getElementById('__pdf_tip__');if(el)el.remove();document.body.classList.remove('__pdf__');">收起提示</button>
+      </div>
+    </div>
+  `;
+  return html
+    .replace('</head>', `${tipStyle}</head>`)
+    .replace('<body>', `<body class="__pdf__">${tipDiv}`);
+}
+
+function waitForImagesInWindow(win: Window, timeoutMs = 5000): Promise<void> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = (): void => {
+      try {
+        const doc = win.document;
+        const imgs = Array.from(doc.images);
+        const allLoaded = imgs.every(
+          (img) => img.complete && img.naturalHeight !== 0,
+        );
+        if (allLoaded || Date.now() - start > timeoutMs) {
+          resolve();
+          return;
+        }
+      } catch {
+        // 窗口跨域或已关闭
+        resolve();
         return;
       }
-      const onDone = () => {
-        done += 1;
+      win.setTimeout(check, 100);
+    };
+    try {
+      if (win.document.readyState === 'complete') {
         check();
-      };
-      img.addEventListener('load', onDone, { once: true });
-      img.addEventListener('error', onDone, { once: true });
-    });
+      } else {
+        win.addEventListener('load', check, { once: true });
+        // 兜底 timeout，防止 load 事件不触发
+        win.setTimeout(check, 500);
+      }
+    } catch {
+      resolve();
+    }
   });
-}
-
-function sanitizeFilename(name: string): string {
-  return name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'SOP';
 }

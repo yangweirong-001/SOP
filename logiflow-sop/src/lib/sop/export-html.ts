@@ -66,7 +66,7 @@ function renderActionBody(step: ActionStep): string {
     return `<div class="border-t border-slate-100 pt-4 mt-4 bg-sky-50/60 rounded-lg p-4">
         <h4 class="text-sm font-semibold text-sky-700 mb-2 flex items-center gap-1.5">📝 备注 <span class="text-xs font-normal text-sky-500">(${has ?? 0})</span></h4>
         ${has
-          ? `<ol class="list-decimal pl-6 text-sm text-slate-700 space-y-1 whitespace-pre-wrap">
+          ? `<ol class="pl-6 text-sm text-slate-700 space-y-1 whitespace-pre-wrap">
               ${step.notes!.map((n, i) => `<li><span class="font-semibold text-sky-700 mr-1">${i + 1}.</span>${preWrap(stripLeadingNumber(n))}</li>`).join('')}
             </ol>`
           : `<p class="text-sm text-slate-400 italic">（未填写备注，可在属性面板添加）</p>`}
@@ -130,7 +130,7 @@ function renderActionBody(step: ActionStep): string {
   const renderList = (items: string[], cls: string): string =>
     items.length === 1
       ? `<div class="text-sm ${cls} mt-1">${preWrap(stripLeadingNumber(items[0]))}</div>`
-      : `<ol class="text-sm ${cls} mt-1 list-decimal list-inside space-y-0.5">${items
+      : `<ol class="text-sm ${cls} mt-1 pl-6 space-y-0.5">${items
           .map(
             (v, i) =>
               `<li><span class="font-semibold mr-1">${i + 1}.</span>${preWrap(stripLeadingNumber(v))}</li>`,
@@ -237,8 +237,36 @@ function renderDecisionBlock(d: DecisionStep, localNo: number, anchor: string): 
         ${branchList(yesList, '是', 'emerald')}
         ${branchList(noList, '否', 'red')}
       </div>
+      ${renderNoImages(d)}
     </div>
   </div>`;
+}
+
+function renderNoImages(d: DecisionStep): string {
+  const imgs = d.noImages ?? [];
+  const caps = d.noImageCaptions ?? [];
+  if (imgs.length === 0) return '';
+  return `<div class="mt-4 border-t border-red-100 pt-4">
+      <h5 class="text-sm font-semibold text-red-700 mb-3 flex items-center gap-1.5">📷 「否」路径示例图片 <span class="text-xs font-normal text-red-400">(${imgs.length})</span></h5>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+        ${imgs
+          .map((src, ii) => {
+            const cap = caps[ii] ?? '';
+            const capHtml = cap
+              ? `<div class="px-2 py-1.5 text-xs text-slate-600 border-t border-slate-100 bg-slate-50/70 whitespace-pre-wrap">${preWrap(cap)}</div>`
+              : '';
+            return `
+      <figure class="block rounded-lg overflow-hidden border border-red-200 bg-white hover:border-red-400 transition">
+        <a href="${src}" target="_blank" rel="noopener" class="block">
+          <img src="${src}" alt="${escapeHtml(cap || `否路径示例 ${ii + 1}`)}" class="w-full h-40 object-contain bg-slate-50" />
+        </a>
+        <figcaption class="px-2 py-1 text-[11px] text-slate-500 bg-slate-100/60 border-t border-slate-100">图 ${ii + 1}</figcaption>
+        ${capHtml}
+      </figure>`;
+          })
+          .join('')}
+      </div>
+    </div>`;
 }
 
 export function buildExportHtml(sop: SopDoc): string {

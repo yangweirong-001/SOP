@@ -91,7 +91,7 @@ function substepsBlock(substeps: string[] | undefined): string {
         const rows = substeps
           .map(
             (s, i) =>
-              `<tr><td style="padding:6px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-weight:bold;width:70px;text-align:center;vertical-align:top;">步骤 ${i + 1}</td><td style="padding:6px;border:1px solid #bfdbfe;background:#fff;word-break:break-word;">${preWrap(s || '—')}</td></tr>`,
+              `<tr><td style="padding:6px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-weight:bold;width:70px;text-align:center;vertical-align:top;">步骤 ${i + 1}</td><td style="padding:6px;border:1px solid #bfdbfe;background:#fff;word-break:break-word;">${preWrap(stripLeadingNumber(s || '—'))}</td></tr>`,
           )
           .join('');
         return `<table style="width:100%;border-collapse:collapse;font-size:13px;">${rows}</table>`;
@@ -104,6 +104,10 @@ function preWrap(text: string): string {
   // 把换行符渲染为 <br/>，让 Word/打印都能保留多行
   return escapeHtml(text).replace(/\n/g, '<br/>');
 }
+
+// 剥掉用户手动写在开头的编号（1. / 1、/ 1) / 一、 等），避免与系统自动加的编号重复
+const stripLeadingNumber = (s: string): string =>
+  s.replace(/^[\s\u3000]*(?:\d+|[一二三四五六七八九十百千]+)[.．、)）]\s*/, '');
 
 function buildTocHtml(sop: SopDoc): string {
   const groups = groupForExport(sop);
@@ -161,11 +165,11 @@ function actionStepToWordHtml(step: ActionStep, actionNo: number): string {
       : [];
   const listHtml = (items: string[]): string =>
     items.length === 1
-      ? preWrap(items[0])
+      ? preWrap(stripLeadingNumber(items[0]))
       : `<ol style="margin:0;padding-left:22px;">${items
           .map(
             (c, i) =>
-              `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(c)}</li>`,
+              `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(stripLeadingNumber(c))}</li>`,
           )
           .join('')}</ol>`;
   const risk =
@@ -177,10 +181,10 @@ function actionStepToWordHtml(step: ActionStep, actionNo: number): string {
       ? `<tr><td style="padding:6px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-weight:bold;vertical-align:top;">管控措施（${controlsArr.length}）</td><td style="padding:6px;border:1px solid #fecaca;background:#fff;">${listHtml(controlsArr)}</td></tr>`
       : '';
   const checklist = step.checklist?.length
-    ? `<tr><td style="padding:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:bold;vertical-align:top;">检查清单（${step.checklist.length}）</td><td style="padding:6px;border:1px solid #a7f3d0;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.checklist.map((c, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(c)}</li>`).join('')}</ol></td></tr>`
+    ? `<tr><td style="padding:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:bold;vertical-align:top;">检查清单（${step.checklist.length}）</td><td style="padding:6px;border:1px solid #a7f3d0;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.checklist.map((c, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(stripLeadingNumber(c))}</li>`).join('')}</ol></td></tr>`
     : `<tr><td style="padding:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:bold;vertical-align:top;">检查清单</td><td style="padding:6px;border:1px solid #a7f3d0;background:#fff;color:#94a3b8;font-style:italic;">（未填写检查清单）</td></tr>`;
   const notes = step.notes?.length
-    ? `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注（${step.notes.length}）</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.notes.map((n, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(n)}</li>`).join('')}</ol></td></tr>`
+    ? `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注（${step.notes.length}）</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.notes.map((n, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(stripLeadingNumber(n))}</li>`).join('')}</ol></td></tr>`
     : `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;color:#94a3b8;font-style:italic;">（未填写备注）</td></tr>`;
   return `
     <div style="page-break-inside:avoid;">
@@ -222,7 +226,7 @@ function decisionStepToWordHtml(
         : `<table style="width:100%;border-collapse:collapse;font-size:13px;">${items
             .map(
               (s, i) =>
-                `<tr><td style="padding:6px;background:${bg};border:1px solid ${border};color:${color};font-weight:bold;width:70px;text-align:center;vertical-align:top;">步骤 ${i + 1}</td><td style="padding:6px;border:1px solid ${border};background:#fff;word-break:break-word;">${preWrap(s || '—')}</td></tr>`,
+                `<tr><td style="padding:6px;background:${bg};border:1px solid ${border};color:${color};font-weight:bold;width:70px;text-align:center;vertical-align:top;">步骤 ${i + 1}</td><td style="padding:6px;border:1px solid ${border};background:#fff;word-break:break-word;">${preWrap(stripLeadingNumber(s || '—'))}</td></tr>`,
             )
             .join('')}</table>`;
     return `<tr>

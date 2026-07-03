@@ -166,7 +166,7 @@ function actionStepToWordHtml(step: ActionStep, actionNo: number): string {
   const listHtml = (items: string[]): string =>
     items.length === 1
       ? preWrap(stripLeadingNumber(items[0]))
-      : `<ol style="margin:0;padding-left:22px;">${items
+      : `<ol style="margin:0;padding-left:22px;list-style:none;">${items
           .map(
             (c, i) =>
               `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(stripLeadingNumber(c))}</li>`,
@@ -181,10 +181,10 @@ function actionStepToWordHtml(step: ActionStep, actionNo: number): string {
       ? `<tr><td style="padding:6px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-weight:bold;vertical-align:top;">管控措施（${controlsArr.length}）</td><td style="padding:6px;border:1px solid #fecaca;background:#fff;">${listHtml(controlsArr)}</td></tr>`
       : '';
   const checklist = step.checklist?.length
-    ? `<tr><td style="padding:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:bold;vertical-align:top;">检查清单（${step.checklist.length}）</td><td style="padding:6px;border:1px solid #a7f3d0;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.checklist.map((c, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(stripLeadingNumber(c))}</li>`).join('')}</ol></td></tr>`
+    ? `<tr><td style="padding:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:bold;vertical-align:top;">检查清单（${step.checklist.length}）</td><td style="padding:6px;border:1px solid #a7f3d0;background:#fff;"><ol style="margin:0;padding-left:22px;list-style:none;">${step.checklist.map((c, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(stripLeadingNumber(c))}</li>`).join('')}</ol></td></tr>`
     : `<tr><td style="padding:6px;background:#ecfdf5;border:1px solid #a7f3d0;color:#047857;font-weight:bold;vertical-align:top;">检查清单</td><td style="padding:6px;border:1px solid #a7f3d0;background:#fff;color:#94a3b8;font-style:italic;">（未填写检查清单）</td></tr>`;
   const notes = step.notes?.length
-    ? `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注（${step.notes.length}）</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;"><ol style="margin:0;padding-left:22px;">${step.notes.map((n, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(stripLeadingNumber(n))}</li>`).join('')}</ol></td></tr>`
+    ? `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注（${step.notes.length}）</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;"><ol style="margin:0;padding-left:22px;list-style:none;">${step.notes.map((n, i) => `<li><span style="font-weight:bold;margin-right:4px;">${i + 1}.</span>${preWrap(stripLeadingNumber(n))}</li>`).join('')}</ol></td></tr>`
     : `<tr><td style="padding:6px;background:#f0f9ff;border:1px solid #bae6fd;color:#0369a1;font-weight:bold;vertical-align:top;">备注</td><td style="padding:6px;border:1px solid #bae6fd;background:#fff;color:#94a3b8;font-style:italic;">（未填写备注）</td></tr>`;
   return `
     <div style="page-break-inside:avoid;">
@@ -244,6 +244,7 @@ function decisionStepToWordHtml(
         <tr><td style="padding:6px;background:#fffbeb;border:1px solid #fde68a;font-weight:bold;vertical-align:top;">判断条件</td><td style="padding:6px;border:1px solid #fde68a;word-break:break-word;">${preWrap(step.condition)}</td></tr>
         ${branchRow(yesList, '「是」路径', '#ecfdf5', '#bbf7d0', '#065f46')}
         ${branchRow(noList, '「否」路径', '#fef2f2', '#fecaca', '#991b1b')}
+        ${imagesBlock(step.noImages, '「否」路径示例图片', step.noImageCaptions)}
       </table>
     </div>
   `;
@@ -272,137 +273,4 @@ export function buildWordHtml(sop: SopDoc): string {
 <meta name="ProgId" content="Word.Document" />
 <meta name="Generator" content="Microsoft Word 15" />
 <title>${escapeHtml(sop.title)}</title>
-<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotPromptForConvert/></w:WordDocument></xml><![endif]-->
-<style>
-  /* Word 页面设置：A4，左右页边距 2cm，可用宽度 ~17cm */
-  @page Section1 {
-    size: 21cm 29.7cm;
-    margin: 2cm 2cm 2cm 2cm;
-    mso-page-orientation: portrait;
-  }
-  div.Section1 { page: Section1; }
-  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #0f172a; line-height: 1.6; }
-  h1 { color: #1e3a8a; border-bottom: 3px solid #2563eb; padding-bottom: 8px; }
-  table { margin: 8px 0; width: 100%; }
-  img { max-width: 100%; height: auto; }
-</style>
-</head>
-<body>
-<div class="Section1">
-  <h1>${escapeHtml(sop.title)}</h1>
-  <p style="color:#475569;">${escapeHtml(sop.desc)}</p>
-  <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:16px;">
-    <tr>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;width:25%;">版本</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;width:25%;">${escapeHtml(sop.version)}</td>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;width:25%;">负责人</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;width:25%;">${escapeHtml(sop.owner)}</td>
-    </tr>
-    <tr>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">预计耗时</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.duration)}</td>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">适用场景</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.scenario)}</td>
-    </tr>
-    <tr>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">状态</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.status)}</td>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">更新日期</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.updatedAt)}</td>
-    </tr>
-  </table>
-  ${tocHtml}
-  ${stepsHtml}
-  <p style="margin-top:32px;color:#94a3b8;font-size:12px;text-align:center;">
-    由 LogiFlow SOP 系统生成 · ${new Date().toLocaleString('zh-CN')}
-  </p>
-</div>
-</body>
-</html>`;
-}
-
-export function downloadWord(sop: SopDoc): void {
-  if (typeof window === 'undefined') return;
-  const html = buildWordHtml(sop);
-  // Word 可识别 application/msword + .doc 的 HTML 文档
-  const blob = new Blob(['\ufeff', html], {
-    type: 'application/msword;charset=utf-8',
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `SOP_${sop.title}_${Date.now()}.doc`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-export function buildPrintHtml(sop: SopDoc): string {
-  const stepsHtml = buildStepsHtml(sop);
-  const tocHtml = buildTocHtml(sop);
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8" />
-<title>${escapeHtml(sop.title)}</title>
-<style>
-  @page { size: A4; margin: 16mm 14mm; }
-  * { box-sizing: border-box; }
-  html, body { background: #fff; }
-  body {
-    font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
-    color: #0f172a;
-    line-height: 1.65;
-    font-size: 13px;
-    margin: 0;
-    padding: 24px 28px;
-  }
-  h1 { color: #1e3a8a; border-bottom: 3px solid #2563eb; padding-bottom: 8px; margin: 0 0 8px; font-size: 22px; }
-  h2 { font-size: 15px; margin-top: 18px; page-break-after: avoid; }
-  p { margin: 4px 0; }
-  table { width: 100%; border-collapse: collapse; margin: 6px 0; page-break-inside: avoid; }
-  td { vertical-align: top; word-break: break-word; }
-  img { max-width: 100%; height: auto; }
-  .meta { color: #475569; margin-bottom: 12px; }
-  /* 打印优化 */
-  @media print {
-    body { padding: 0; }
-    h2 { break-after: avoid-page; }
-    table { break-inside: avoid; }
-    a { color: inherit; text-decoration: none; }
-  }
-</style>
-</head>
-<body>
-  <h1>${escapeHtml(sop.title)}</h1>
-  <p class="meta">${escapeHtml(sop.desc)}</p>
-  <table style="font-size:12px;">
-    <tr>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;width:18%;">版本</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;width:32%;">${escapeHtml(sop.version)}</td>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;width:18%;">负责人</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;width:32%;">${escapeHtml(sop.owner)}</td>
-    </tr>
-    <tr>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">预计耗时</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.duration)}</td>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">适用场景</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.scenario)}</td>
-    </tr>
-    <tr>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">状态</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.status)}</td>
-      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">更新日期</td>
-      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.updatedAt)}</td>
-    </tr>
-  </table>
-  ${tocHtml}
-  ${stepsHtml}
-  <p style="margin-top:24px;color:#94a3b8;font-size:11px;text-align:center;">
-    由 LogiFlow SOP 系统生成 · ${new Date().toLocaleString('zh-CN')}
-  </p>
-</body>
-</html>`;
-}
-
-// 真·PDF 导出已迁移到 ./export-pdf.ts (html2canvas + jsPDF)。
-// 保留 buildPrintHtml 供 PDF 复用；不再提供基于 window.print 的 exportPdf。
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:

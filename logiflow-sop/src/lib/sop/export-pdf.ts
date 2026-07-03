@@ -12,7 +12,6 @@ import { buildPrintHtml } from './export-word';
  * 只在用户点"导出 PDF"时才按需加载。
  */
 export async function exportPdf(sop: SopDoc): Promise<void> {
-  // 按需加载 PDF 相关依赖（首次调用时才会去拉两个 chunk）
   const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
     import('html2canvas'),
     import('jspdf'),
@@ -20,12 +19,11 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
 
   const html = buildPrintHtml(sop);
 
-  // 1. 造一个隐藏 iframe（srcdoc 与父页面同源但样式完全隔离）
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.left = '-99999px';
   iframe.style.top = '0';
-  iframe.style.width = '794px'; // A4 96dpi 宽度
+  iframe.style.width = '794px';
   iframe.style.height = '10px';
   iframe.style.border = '0';
   iframe.style.zIndex = '-1';
@@ -34,7 +32,6 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
   document.body.appendChild(iframe);
 
   try {
-    // 2. 用 srcdoc 装载自包含 HTML，等 load 完成
     await new Promise<void>((resolve, reject) => {
       const timer = window.setTimeout(
         () => reject(new Error('iframe 加载超时')),
@@ -57,22 +54,17 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
       throw new Error('无法访问 iframe 内容文档');
     }
 
-    // 3. 补一层兜底：万一有 oklch/lab 漏进来的场景，
-    //    在 iframe 里注入一段强制回退样式（正常情况下不生效，只是防御）
     const fallback = idoc.createElement('style');
     fallback.textContent = `
-      /* PDF 导出兜底：显式回退颜色，防止残留 oklch/lab 变量 */
       html, body { background: #ffffff !important; color: #0f172a !important; }
     `;
     idoc.head.appendChild(fallback);
 
-    // 4. 等 iframe 内所有图片就绪
     await waitForImages(idoc.body);
     await new Promise((resolve) =>
       iwin.requestAnimationFrame(() => resolve(null)),
     );
 
-    // 5. iframe 高度撑到内容全高，防止 html2canvas 截不到底
     const scrollHeight = Math.max(
       idoc.body.scrollHeight,
       idoc.documentElement.scrollHeight,
@@ -82,23 +74,15 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
       iwin.requestAnimationFrame(() => resolve(null)),
     );
 
-    // 6. jsPDF 分页参数
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    const pdfWidth = pdf.internal.pageSize.getWidth(); // 210
-    const pdfHeight = pdf.internal.pageSize.getHeight(); // 297
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
     const margin = 8;
-    const contentWidth = pdfWidth - margin * 2; // 194
-    const contentHeight = pdfHeight - margin * 2; // 281
-    const pxPerMm = 794 / pdfWidth; // html2canvas 像素 → PDF 毫米
+    const contentWidth = pdfWidth - margin * 2;
+    const contentHeight = pdfHeight - margin * 2;
 
-    // 7. 收集"不可切割块"（每个步骤/判断节点）+ 其余元素，逐块渲染
-    //    这样 html2canvas 不会把单个步骤切成两半
-    const blocks = Array.from(
-      idoc.body.querySelectorAll<HTMLElement>('[data-pdf-block]'),
-    );
     const bodyChildren = Array.from(idoc.body.children) as HTMLElement[];
 
-    // 渲染单个元素为 canvas
     const renderEl = async (el: HTMLElement) => {
       const rect = el.getBoundingClientRect();
       return html2canvas(el, {
@@ -116,14 +100,37 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
       });
     };
 
-    // 把单个 canvas 写入 PDF（可能跨页，但只在块之间分页）
-    const writeCanvas = (cv: HTMLCanvasElement) => {
+    // 当前页已经用掉的高度（单位 mm），控制多块紧凑排布
+    let pageUsed = 0;
+
+    const writeCanvasSmart = (cv: HTMLCanvasElement) => {
       const imgWidth = contentWidth;
       const imgHeight = (cv.height * imgWidth) / cv.width;
       const imgData = cv.toDataURL('image/jpeg', 0.92);
 
-      let heightLeft = imgHeight;
+      // Case A：块比整页小 -> 若当前页放得下就紧接上一块画；放不下才换页并放到新页顶部
+      if (imgHeight <= contentHeight) {
+        if (pageUsed > 0 && pageUsed + imgHeight > contentHeight) {
+          pdf.addPage();
+          pageUsed = 0;
+        }
+        const y = margin + pageUsed;
+        pdf.addImage(imgData, 'JPEG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
+        pageUsed += imgHeight;
+        if (pageUsed >= contentHeight - 1) {
+          pdf.addPage();
+          pageUsed = 0;
+        }
+        return;
+      }
+
+      // Case B：块超长（超一整页）-> 独占页并跨页切分
+      if (pageUsed > 0) {
+        pdf.addPage();
+        pageUsed = 0;
+      }
       let position = margin;
+      let heightLeft = imgHeight;
       pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
       heightLeft -= contentHeight;
       while (heightLeft > 0) {
@@ -132,34 +139,13 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
         pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
         heightLeft -= contentHeight;
       }
+      const usedOnLastPage = imgHeight - Math.floor(imgHeight / contentHeight) * contentHeight;
+      pageUsed = usedOnLastPage < contentHeight ? usedOnLastPage : 0;
     };
 
-    // 当前页剩余高度
-    let pageUsed = 0;
-    const addPageIfNeeded = (needMm: number) => {
-      if (pageUsed + needMm > contentHeight && pageUsed > 0) {
-        pdf.addPage();
-        pageUsed = 0;
-      }
-    };
-
-    // 把 body 直接子元素按"是否 data-pdf-block"分组，逐块渲染
     for (const child of bodyChildren) {
-      if (child.hasAttribute('data-pdf-block')) {
-        // 不可切割块：单独渲染
-        const cv = await renderEl(child);
-        const blockMm = (cv.height * contentWidth) / cv.width;
-        addPageIfNeeded(blockMm);
-        writeCanvas(cv);
-        pageUsed += blockMm;
-      } else {
-        // 普通元素（目录、标题等）：整段渲染
-        const cv = await renderEl(child);
-        const blockMm = (cv.height * contentWidth) / cv.width;
-        addPageIfNeeded(blockMm);
-        writeCanvas(cv);
-        pageUsed += blockMm;
-      }
+      const cv = await renderEl(child);
+      writeCanvasSmart(cv);
     }
 
     pdf.save(`${sanitizeFilename(sop.title)}.pdf`);

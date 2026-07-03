@@ -4,25 +4,27 @@ import type { SopDoc } from './types';
 import { buildPrintHtml } from './export-word';
 
 /**
- * PDF 一键下载（html2canvas + jsPDF + 单页超长 PDF + 图片高清叠加）
+ * PDF 一键下载（html2canvas + jsPDF + 单页超长 + 图片高清 + 点击放大）
  *
  * 核心策略：
  *  1. 用 buildPrintHtml 生成与 Word 视觉一致的 HTML（同一份 CSS）
- *  2. 用 html2canvas 抓取整个 body 成 **一张长 canvas**（作为底图，含文字+表格+图片）
- *  3. jsPDF 以 **A4 宽 × 内容全高** 作为单页尺寸生成 PDF
- *  4. **图片高清叠加**：遍历 body 里所有 <img>，把每张图片以其原始分辨率
- *      用 pdf.addImage 独立嵌入 PDF，覆盖到底图对应位置。
- *      → PDF 里图片放大不糊，清晰度只受原图分辨率影响（不受 canvas scale 限制）
+ *  2. 用 html2canvas 抓取整个 body 成 **一张长 canvas**（作为底图）
+ *  3. jsPDF 以 **A4 宽 × 内容全高 + 附录高度** 作为单页尺寸生成 PDF
+ *  4. **图片高清叠加**：每张图片以原始分辨率独立嵌入 PDF，覆盖到底图对应位置
+ *  5. **点击放大**：正文之后追加"高清附录区"，每张图独占大尺寸展示，正文里的图片加
+ *      内部超链接 → 点击/双击即可跳转到附录里的大图查看细节
  *
  * 优点：
  *  - ✅ 单页超长：无换页、无空白页、无文字截断
  *  - ✅ 版式与 Word 完全一致（共用 buildPrintHtml）
- *  - ✅ 图片高清嵌入：PDF 里图片可无损放大查看细节
+ *  - ✅ 图片高清嵌入：PDF 里图片可无损放大
+ *  - ✅ **点击图片即可跳转到附录看大图**（像 Word 双击预览的效果）
  *  - ✅ 一键下载 .pdf 文件
  *  - 📖 PDF 阅读器里像看长网页一样滚动
  *
  * 兜底：
- *  - 单页高度超过 jsPDF 5000mm 上限时自动降级为 A4 分页
+ *  - 若正文+附录超过 jsPDF 5000mm 单页上限：跳过附录，只保留正文单页超长
+ *  - 若正文本身超过 5000mm：降级为 A4 分页切片
  */
 export async function exportPdf(sop: SopDoc): Promise<void> {
   if (typeof window === 'undefined') return;
@@ -175,12 +177,60 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
     const imgData = canvas.toDataURL('image/jpeg', 0.92);
 
     if (singlePageHeight <= MAX_SINGLE_PAGE_MM) {
-      // ✅ 主路径：单页超长 PDF
+      // ✅ 主路径：单页超长 PDF + 高清附录（点击图片跳转查看大图）
+
+      // === 附录布局参数 ===
+      const APPENDIX_TITLE_H = 18;   // 附录标题区域高度
+      const APPENDIX_GAP = 10;       // 每张大图之间的间距
+      const APPENDIX_MAX_IMG_H = 200; // 每张大图最高不超过 200mm（避免超单页限制）
+      const APPENDIX_IMG_W = imgWidth; // 大图宽度 = 内容宽 170mm
+
+      // 计算每张图在附录里的显示尺寸（保持原图宽高比 + 限高）
+      type AppendixItem = {
+        overlay: ImageOverlay;
+        appW: number;
+        appH: number;
+      };
+      const appendixItems: AppendixItem[] = imageOverlays.map((ov) => {
+        const ratio = ov.heightPx / ov.widthPx;
+        let appW = APPENDIX_IMG_W;
+        let appH = appW * ratio;
+        if (appH > APPENDIX_MAX_IMG_H) {
+          appH = APPENDIX_MAX_IMG_H;
+          appW = appH / ratio;
+        }
+        return { overlay: ov, appW, appH };
+      });
+
+      // 附录区总高度
+      const appendixHeight =
+        appendixItems.length > 0
+          ? APPENDIX_TITLE_H +
+            appendixItems.reduce((sum, it) => sum + it.appH + APPENDIX_GAP, 0)
+          : 0;
+
+      // 附录区起始 Y（正文底部 + 一个 margin 间距）
+      const appendixStartY =
+        appendixItems.length > 0 ? margin + imgHeight + margin : 0;
+
+      // 总 PDF 高度（含底部 margin）
+      const totalPdfHeight =
+        appendixItems.length > 0
+          ? appendixStartY + appendixHeight + margin
+          : singlePageHeight;
+
+      // 若加了附录后超过单页 5000mm 上限，就跳过附录（只保留正文超长页）
+      const useAppendix =
+        appendixItems.length > 0 && totalPdfHeight <= MAX_SINGLE_PAGE_MM;
+
+      const finalHeight = useAppendix ? totalPdfHeight : singlePageHeight;
+
       const pdf = new jsPDF({
         unit: 'mm',
-        format: [A4_WIDTH_MM, singlePageHeight],
+        format: [A4_WIDTH_MM, finalHeight],
         orientation: 'portrait',
       });
+
       // 先画底图（含文字、表格、图片"底稿"）
       pdf.addImage(
         imgData,
@@ -192,8 +242,74 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
         undefined,
         'FAST',
       );
-      // 再把每张图片以原图分辨率独立嵌入 PDF，覆盖到底图对应区域 → 放大不糊
+      // 图片高清叠加（正文位置的清晰图）
       overlayImagesOnPdf(pdf, 0, 0, imgHeight);
+
+      // 附录区
+      if (useAppendix) {
+        // 附录标题（英文避免 jsPDF 中文字体问题）
+        pdf.setFontSize(13);
+        pdf.setTextColor(30, 58, 138); // #1e3a8a
+        pdf.text(
+          'Appendix - Full-size images (click any image above to jump here)',
+          margin,
+          appendixStartY + 8,
+        );
+        // 分割线
+        pdf.setDrawColor(37, 99, 235);
+        pdf.setLineWidth(0.5);
+        pdf.line(
+          margin,
+          appendixStartY + 12,
+          A4_WIDTH_MM - margin,
+          appendixStartY + 12,
+        );
+
+        // 逐张画大图 + 加正文→附录的跳转链接
+        let cursorY = appendixStartY + APPENDIX_TITLE_H;
+        for (let idx = 0; idx < appendixItems.length; idx += 1) {
+          const item = appendixItems[idx];
+          const ov = item.overlay;
+          const bigX = margin + (APPENDIX_IMG_W - item.appW) / 2; // 居中
+
+          // 附录里的大图
+          try {
+            pdf.addImage(
+              ov.dataUrl,
+              ov.mime === 'image/png' ? 'PNG' : 'JPEG',
+              bigX,
+              cursorY,
+              item.appW,
+              item.appH,
+              undefined,
+              'SLOW',
+            );
+          } catch {
+            // 忽略单张失败
+          }
+          // 编号标签
+          pdf.setFontSize(10);
+          pdf.setTextColor(100, 116, 139); // #64748b
+          pdf.text(`Image ${idx + 1}`, margin, cursorY - 2);
+
+          // 正文位置画一个透明的点击链接矩形 → 跳到大图 y 坐标
+          const linkX = margin + ov.leftPx * pxToMm;
+          const linkY = margin + ov.topPx * pxToMm;
+          const linkW = ov.widthPx * pxToMm;
+          const linkH = ov.heightPx * pxToMm;
+          try {
+            pdf.link(linkX, linkY, linkW, linkH, {
+              pageNumber: 1,
+              top: cursorY - 4, // 略上让标签露出
+            });
+          } catch {
+            // 忽略
+          }
+
+          cursorY += item.appH + APPENDIX_GAP;
+        }
+      }
+
       pdf.save(`${sanitizeFilename(sop.title)}.pdf`);
     } else {
       // ⚠️ 兜底：内容超长，降级为 A4 分页（长图切片 + 图片高清叠加）

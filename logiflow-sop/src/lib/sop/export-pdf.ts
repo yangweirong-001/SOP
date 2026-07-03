@@ -20,12 +20,17 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
 
   const html = buildPrintHtml(sop);
 
+  // buildPrintHtml body 有 40px×44px 内边距，iframe 宽度 720px 时：
+  //   内容宽 = 720 - 44*2 = 632px ≈ 16.7cm，与 Word A4 2cm 边距 (17cm 内容宽) 几乎一致。
+  // PDF 单页内容宽 = 210 - 20*2 = 170mm，1px≈0.264mm，图打进 PDF 无明显放大失真。
+  const IFRAME_WIDTH_PX = 720;
+
   // 1. 造一个隐藏 iframe（srcdoc 与父页面同源但样式完全隔离）
   const iframe = document.createElement('iframe');
   iframe.style.position = 'fixed';
   iframe.style.left = '-99999px';
   iframe.style.top = '0';
-  iframe.style.width = '794px'; // A4 96dpi 宽度
+  iframe.style.width = `${IFRAME_WIDTH_PX}px`;
   iframe.style.height = '10px';
   iframe.style.border = '0';
   iframe.style.zIndex = '-1';
@@ -82,14 +87,13 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
       iwin.requestAnimationFrame(() => resolve(null)),
     );
 
-    // 6. jsPDF 分页参数
+    // 6. jsPDF 分页参数（与 Word A4 2cm 边距完全对齐：210 - 20*2 = 170mm）
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
     const pdfWidth = pdf.internal.pageSize.getWidth(); // 210
     const pdfHeight = pdf.internal.pageSize.getHeight(); // 297
-    const margin = 8;
-    const contentWidth = pdfWidth - margin * 2; // 194
-    const contentHeight = pdfHeight - margin * 2; // 281
-    const pxPerMm = 794 / pdfWidth; // html2canvas 像素 → PDF 毫米
+    const margin = 20; // 与 Word 版式一致
+    const contentWidth = pdfWidth - margin * 2; // 170
+    const contentHeight = pdfHeight - margin * 2; // 257
 
     // 7. 逐块渲染 body 的直接子元素，紧凑排布，避免"每块单独一页"造成大量空白
     const bodyChildren = Array.from(idoc.body.children) as HTMLElement[];
@@ -103,8 +107,8 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
         allowTaint: false,
         backgroundColor: '#ffffff',
         logging: false,
-        windowWidth: 794,
-        width: 794,
+        windowWidth: IFRAME_WIDTH_PX,
+        width: IFRAME_WIDTH_PX,
         height: Math.ceil(rect.height),
         scrollY: -rect.top,
         scrollX: 0,

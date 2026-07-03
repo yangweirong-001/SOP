@@ -45,6 +45,10 @@ export interface DecisionStep {
   yesSubsteps?: string[];
   /** "否"路径的操作子步骤（编号 1/2/3...） */
   noSubsteps?: string[];
+  /** "否"路径的示例图片 */
+  noImages?: string[];
+  /** 与 noImages 一一对应的图片说明（caption） */
+  noImageCaptions?: string[];
   role: string;
   time: string;
   /** 挂载的父操作步骤 id；未设置视为悬空判断（兼容旧数据） */

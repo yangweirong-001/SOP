@@ -2143,6 +2143,219 @@ function ActionStepEditor(props: {
   );
 }
 
+function DecisionNoImagesEditor(props: {
+  images: string[];
+  captions: string[];
+  onImagesChange: (images: string[], captions: string[]) => void;
+}): React.ReactElement {
+  const { images, captions, onImagesChange } = props;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const readFilesAsDataUrls = (files: FileList): void => {
+    const arr = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    if (arr.length === 0) return;
+    Promise.all(
+      arr.map(
+        (f) =>
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(f);
+          }),
+      ),
+    )
+      .then((srcs) => {
+        const nextImgs = [...images, ...srcs].slice(0, 12);
+        const nextCaps = [
+          ...captions,
+          ...srcs.map(() => ''),
+        ].slice(0, 12);
+        onImagesChange(nextImgs, nextCaps);
+        toast.success(`已添加 ${srcs.length} 张图片`);
+      })
+      .catch(() => toast.error('图片读取失败'));
+  };
+
+  const removeImage = (idx: number): void => {
+    const nextImgs = [...images];
+    const nextCaps = [...captions];
+    nextImgs.splice(idx, 1);
+    nextCaps.splice(idx, 1);
+    onImagesChange(nextImgs, nextCaps);
+  };
+
+  const updateCaption = (idx: number, cap: string): void => {
+    const nextCaps = [...captions];
+    while (nextCaps.length < images.length) nextCaps.push('');
+    nextCaps[idx] = cap;
+    onImagesChange(images, nextCaps);
+  };
+
+  // 快捷键 Ctrl/Cmd+V 从剪贴板粘贴图片（需要在图片区聚焦后使用）
+  const handlePaste = (e: React.ClipboardEvent<HTMLElement>): void => {
+    const data = e.clipboardData;
+    if (!data) return;
+    const files: File[] = [];
+    if (data.items && data.items.length > 0) {
+      for (let i = 0; i < data.items.length; i += 1) {
+        const it = data.items[i];
+        if (it.kind === 'file' && it.type.startsWith('image/')) {
+          const f = it.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+    }
+    if (files.length === 0 && data.files && data.files.length > 0) {
+      for (let i = 0; i < data.files.length; i += 1) {
+        const f = data.files[i];
+        if (f && f.type.startsWith('image/')) files.push(f);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      // 复用 readFilesAsDataUrls，因为它接受 FileList，我们用 DataTransfer 构造
+      const dt = new DataTransfer();
+      files.forEach((f) => dt.items.add(f));
+      readFilesAsDataUrls(dt.files);
+    }
+  };
+
+  const pasteFromClipboardApi = async (): Promise<void> => {
+    try {
+      const items = await navigator.clipboard.read();
+      const srcs: string[] = [];
+      for (const item of items) {
+        for (const t of item.types) {
+          if (t.startsWith('image/')) {
+            const blob = await item.getType(t);
+            const url: string = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result));
+              reader.onerror = () => reject(reader.error);
+              reader.readAsDataURL(blob);
+            });
+            srcs.push(url);
+          }
+        }
+      }
+      if (srcs.length === 0) {
+        toast.error('剪贴板中没有图片');
+        return;
+      }
+      const nextImgs = [...images, ...srcs].slice(0, 12);
+      const nextCaps = [...captions, ...srcs.map(() => '')].slice(0, 12);
+      onImagesChange(nextImgs, nextCaps);
+      toast.success(`已粘贴 ${srcs.length} 张图片`);
+    } catch {
+      toast.error('无法读取剪贴板，请授权或使用上传按钮');
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <FieldLabel className="mb-0">
+          「否」路径示例图片
+          <span className="ml-1 text-slate-400 font-normal">
+            ({images.length}/12)
+          </span>
+        </FieldLabel>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) readFilesAsDataUrls(e.target.files);
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            onClick={pasteFromClipboardApi}
+            className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1"
+            title="从系统剪贴板读取图片（需授权）"
+          >
+            <ImageIcon className="w-3.5 h-3.5" />
+            从剪贴板粘贴
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            上传图片
+          </button>
+        </div>
+      </div>
+      <div
+        tabIndex={0}
+        onPaste={handlePaste}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.currentTarget.classList.add('border-red-400', 'bg-red-50/40');
+        }}
+        onDragLeave={(e) => {
+          e.currentTarget.classList.remove('border-red-400', 'bg-red-50/40');
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.currentTarget.classList.remove('border-red-400', 'bg-red-50/40');
+          if (e.dataTransfer.files.length > 0) {
+            readFilesAsDataUrls(e.dataTransfer.files);
+          }
+        }}
+        className="border-2 border-dashed border-red-200 rounded-lg p-3 transition focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-200"
+      >
+        {images.length === 0 ? (
+          <div className="text-center text-xs text-slate-400 py-4">
+            <ImageIcon className="w-6 h-6 mx-auto mb-2 text-slate-300" />
+            <p>拖拽 / 点击上方按钮添加，或点此区域后按 Ctrl/Cmd+V 粘贴</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {images.map((src, i) => (
+              <div
+                key={i}
+                className="group relative rounded-md overflow-hidden border border-red-100 bg-white flex flex-col"
+              >
+                <div className="relative bg-slate-50 aspect-video">
+                  <img
+                    src={src}
+                    alt={captions[i] || `否路径示例 ${i + 1}`}
+                    className="w-full h-full object-contain"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeImage(i)}
+                    className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition"
+                    aria-label="移除图片"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                  <span className="absolute bottom-1 left-1 text-[10px] px-1.5 py-0.5 rounded bg-black/50 text-white font-medium">
+                    图 {i + 1}
+                  </span>
+                </div>
+                <Input
+                  value={captions[i] ?? ''}
+                  onChange={(e) => updateCaption(i, e.target.value)}
+                  placeholder={`点击输入图片说明（图 ${i + 1}）`}
+                  className="h-8 text-xs border-none focus-visible:ring-1 focus-visible:ring-red-500 rounded-none bg-slate-50/50"
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 function DecisionStepEditor(props: {
   step: DecisionStep;
   onChange: <K extends keyof DecisionStep>(
@@ -2242,189 +2455,6 @@ function DecisionStepEditor(props: {
           <Trash2 className="w-4 h-4" />
           删除此判断节点
         </Button>
-      </div>
-    </div>
-  );
-}
-
-
-function DecisionNoImagesEditor(props: {
-  images: string[];
-  captions: string[];
-  onImagesChange: (images: string[], captions: string[]) => void;
-}): React.ReactElement {
-  const { images, captions, onImagesChange } = props;
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const readFilesAsDataUrls = (files: FileList): void => {
-    const arr = Array.from(files).filter((f) => f.type.startsWith('image/'));
-    if (arr.length === 0) return;
-    Promise.all(
-      arr.map(
-        (f) =>
-          new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result));
-            reader.onerror = () => reject(reader.error);
-            reader.readAsDataURL(f);
-          }),
-      ),
-    )
-      .then((srcs) => {
-        const nextImgs = [...images, ...srcs].slice(0, 12);
-        const nextCaps = [
-          ...captions,
-          ...srcs.map(() => ''),
-        ].slice(0, 12);
-        onImagesChange(nextImgs, nextCaps);
-        toast.success(`已添加 ${srcs.length} 张图片`);
-      })
-      .catch(() => toast.error('图片读取失败'));
-  };
-
-  const removeImage = (idx: number): void => {
-    const nextImgs = [...images];
-    const nextCaps = [...captions];
-    nextImgs.splice(idx, 1);
-    nextCaps.splice(idx, 1);
-    onImagesChange(nextImgs, nextCaps);
-  };
-
-  const updateCaption = (idx: number, cap: string): void => {
-    const nextCaps = [...captions];
-    while (nextCaps.length < images.length) nextCaps.push('');
-    nextCaps[idx] = cap;
-    onImagesChange(images, nextCaps);
-  };
-
-  const pasteFromClipboardApi = async (): Promise<void> => {
-    try {
-      const items = await navigator.clipboard.read();
-      const srcs: string[] = [];
-      for (const item of items) {
-        for (const t of item.types) {
-          if (t.startsWith('image/')) {
-            const blob = await item.getType(t);
-            const url: string = await new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(String(reader.result));
-              reader.onerror = () => reject(reader.error);
-              reader.readAsDataURL(blob);
-            });
-            srcs.push(url);
-          }
-        }
-      }
-      if (srcs.length === 0) {
-        toast.error('剪贴板中没有图片');
-        return;
-      }
-      const nextImgs = [...images, ...srcs].slice(0, 12);
-      const nextCaps = [...captions, ...srcs.map(() => '')].slice(0, 12);
-      onImagesChange(nextImgs, nextCaps);
-      toast.success(`已粘贴 ${srcs.length} 张图片`);
-    } catch {
-      toast.error('无法读取剪贴板，请授权或使用上传按钮');
-    }
-  };
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <FieldLabel className="mb-0">
-          「否」路径示例图片
-          <span className="ml-1 text-slate-400 font-normal">
-            ({images.length}/12)
-          </span>
-        </FieldLabel>
-        <div className="flex items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files) readFilesAsDataUrls(e.target.files);
-              e.target.value = '';
-            }}
-          />
-          <button
-            type="button"
-            onClick={pasteFromClipboardApi}
-            className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1"
-            title="从系统剪贴板读取图片（需授权）"
-          >
-            <ImageIcon className="w-3.5 h-3.5" />
-            从剪贴板粘贴
-          </button>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            上传图片
-          </button>
-        </div>
-      </div>
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.currentTarget.classList.add('border-red-400', 'bg-red-50/40');
-        }}
-        onDragLeave={(e) => {
-          e.currentTarget.classList.remove('border-red-400', 'bg-red-50/40');
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          e.currentTarget.classList.remove('border-red-400', 'bg-red-50/40');
-          if (e.dataTransfer.files.length > 0) {
-            readFilesAsDataUrls(e.dataTransfer.files);
-          }
-        }}
-        className="border-2 border-dashed border-red-200 rounded-lg p-3 transition"
-      >
-        {images.length === 0 ? (
-          <div className="text-center text-xs text-slate-400 py-4">
-            <ImageIcon className="w-6 h-6 mx-auto mb-2 text-slate-300" />
-            <p>拖拽 / 点击上方按钮添加「否」路径的示例图片</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-3">
-            {images.map((src, i) => (
-              <div
-                key={i}
-                className="group relative rounded-md overflow-hidden border border-red-100 bg-white flex flex-col"
-              >
-                <div className="relative bg-slate-50 aspect-video">
-                  <img
-                    src={src}
-                    alt={captions[i] || `否路径示例 ${i + 1}`}
-                    className="w-full h-full object-contain"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeImage(i)}
-                    className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition"
-                    aria-label="移除图片"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                  <span className="absolute bottom-1 left-1 text-[10px] px-1.5 py-0.5 rounded bg-black/50 text-white font-medium">
-                    图 {i + 1}
-                  </span>
-                </div>
-                <Input
-                  value={captions[i] ?? ''}
-                  onChange={(e) => updateCaption(i, e.target.value)}
-                  placeholder={`点击输入图片说明（图 ${i + 1}）`}
-                  className="h-8 text-xs border-none focus-visible:ring-1 focus-visible:ring-red-500 rounded-none bg-slate-50/50"
-                />
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

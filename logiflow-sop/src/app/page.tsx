@@ -499,6 +499,109 @@ export default function LogiFlowEditor(): React.ReactElement {
     input.click();
   };
 
+  // 导出「当前」单个 SOP 为 JSON，用于分享给他人
+  const handleExportSingle = (): void => {
+    try {
+      const json = JSON.stringify(activeSop, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const a = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      a.href = url;
+      const safeName = (activeSop.title || 'SOP').replace(/[\\/:*?"<>|]/g, '_');
+      a.download = `SOP_${safeName}_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`已导出「${activeSop.title}」为单文件 JSON`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`导出失败：${msg}`);
+    }
+  };
+
+  // 从 JSON 恢复「单个」SOP：兼容"单对象"和"数组含单元素"两种格式
+  // - 若 ID 与现有 SOP 冲突：让用户选覆盖或作为新 SOP 追加（自动重命名 ID）
+  // - 若不冲突：直接追加到 SOP 列表末尾，并激活该 SOP
+  const handleRestoreSingle = (): void => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text) as unknown;
+
+        // 兼容两种格式：单对象 或 数组（取第一个/让用户确认）
+        let doc: SopDoc | null = null;
+        if (Array.isArray(parsed)) {
+          if (parsed.length === 0) {
+            toast.error('导入失败：文件是空数组');
+            return;
+          }
+          if (parsed.length > 1) {
+            const ok = window.confirm(
+              `文件里有 ${parsed.length} 个 SOP。\n\n本功能只导入第一个「${(parsed[0] as SopDoc)?.title ?? '未命名'}」，若要全部导入请用「从 JSON 恢复（全部覆盖）」。\n\n是否继续导入第一个？`,
+            );
+            if (!ok) return;
+          }
+          doc = parsed[0] as SopDoc;
+        } else if (parsed && typeof parsed === 'object') {
+          doc = parsed as SopDoc;
+        }
+
+        // 校验必备字段
+        if (
+          !doc ||
+          typeof (doc as SopDoc).id !== 'string' ||
+          typeof (doc as SopDoc).title !== 'string' ||
+          !Array.isArray((doc as SopDoc).steps)
+        ) {
+          toast.error('导入失败：文件不是有效的 SOP 格式（缺少 id/title/steps 字段）');
+          return;
+        }
+
+        const incoming = doc as SopDoc;
+        const conflictIndex = sops.findIndex((s) => s.id === incoming.id);
+
+        if (conflictIndex >= 0) {
+          const overwrite = window.confirm(
+            `已存在相同 ID 的 SOP：「${sops[conflictIndex].title}」\n\n点【确定】覆盖它\n点【取消】作为新 SOP 追加（自动生成新 ID）`,
+          );
+          if (overwrite) {
+            const updated = [...sops];
+            updated[conflictIndex] = incoming;
+            setSops(updated);
+            setActiveId(incoming.id);
+            setSelectedStepId(null);
+            toast.success(`已覆盖 SOP「${incoming.title}」`);
+          } else {
+            const newDoc: SopDoc = {
+              ...incoming,
+              id: `${incoming.id}-${Date.now()}`,
+              title: `${incoming.title}（副本）`,
+            };
+            setSops([...sops, newDoc]);
+            setActiveId(newDoc.id);
+            setSelectedStepId(null);
+            toast.success(`已作为新 SOP 追加：「${newDoc.title}」`);
+          }
+        } else {
+          setSops([...sops, incoming]);
+          setActiveId(incoming.id);
+          setSelectedStepId(null);
+          toast.success(`已导入单个 SOP：「${incoming.title}」`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast.error(`导入失败：${msg}`);
+      }
+    };
+    input.click();
+  };
+
   const handleExportHtml = (): void => {
     downloadHtml(activeSop);
     toast.success('已开始导出 HTML');
@@ -787,8 +890,23 @@ export default function LogiFlowEditor(): React.ReactElement {
               <DropdownMenuItem onSelect={handleRestore} className="gap-2 cursor-pointer">
                 <FileText className="h-4 w-4 text-amber-600" />
                 <div className="flex flex-col">
-                  <span>从 JSON 恢复</span>
-                  <span className="text-xs text-slate-500">导入备份文件</span>
+                  <span>从 JSON 恢复（全部覆盖）</span>
+                  <span className="text-xs text-slate-500">导入备份文件，覆盖全部</span>
+                </div>
+              </DropdownMenuItem>
+              <div className="my-1 h-px bg-slate-200" />
+              <DropdownMenuItem onSelect={handleExportSingle} className="gap-2 cursor-pointer">
+                <FileDown className="h-4 w-4 text-blue-600" />
+                <div className="flex flex-col">
+                  <span>导出当前 SOP 为 JSON</span>
+                  <span className="text-xs text-slate-500">分享单个 SOP 给他人</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleRestoreSingle} className="gap-2 cursor-pointer">
+                <FileText className="h-4 w-4 text-purple-600" />
+                <div className="flex flex-col">
+                  <span>从 JSON 恢复（单个）</span>
+                  <span className="text-xs text-slate-500">导入他人发来的单个 SOP</span>
                 </div>
               </DropdownMenuItem>
             </DropdownMenuContent>

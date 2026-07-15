@@ -22,7 +22,6 @@ import {
   Plus,
   Printer,
   Save,
-  Send,
   Sparkles,
   Trash2,
   User2,
@@ -65,15 +64,14 @@ import {
 } from '@/lib/sop/storage';
 import type {
   ActionStep,
-  ChatMessage,
   DecisionStep,
   ProcessType,
   SopDoc,
   SopStep,
 } from '@/lib/sop/types';
-import { downloadHtml } from '@/lib/sop/export-html';
-import { downloadWord } from '@/lib/sop/export-word';
-import { exportPdf } from '@/lib/sop/export-pdf';
+import { downloadHtml, downloadMultiHtml } from '@/lib/sop/export-html';
+import { downloadWord, downloadMultiWord } from '@/lib/sop/export-word';
+import { exportPdf, exportMultiPdf } from '@/lib/sop/export-pdf';
 
 const PROCESS_TYPE_OPTIONS: Array<{ value: ProcessType; label: string }> = [
   { value: 'inbound', label: '入库流程' },
@@ -81,13 +79,6 @@ const PROCESS_TYPE_OPTIONS: Array<{ value: ProcessType; label: string }> = [
   { value: 'internal', label: '库内作业' },
   { value: 'transport', label: '运输配送' },
   { value: 'exception', label: '异常处理' },
-];
-
-const QUICK_PROMPTS: string[] = [
-  '优化当前流程',
-  '检查风险点',
-  '生成培训文档',
-  '合规性自检',
 ];
 
 function makeActionStep(id: number): ActionStep {
@@ -124,18 +115,13 @@ export default function LogiFlowEditor(): React.ReactElement {
   const [sops, setSops] = useState<SopDoc[]>(DEFAULT_SOPS);
   const [activeId, setActiveId] = useState<string>(DEFAULT_SOPS[0].id);
   const [selectedStepId, setSelectedStepId] = useState<number | null>(null);
-  const [agentOpen, setAgentOpen] = useState<boolean>(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState<string>('');
-  const [streaming, setStreaming] = useState<boolean>(false);
+  const [batchExportOpen, setBatchExportOpen] = useState<boolean>(false);
   const [preview, setPreview] = useState<boolean>(false);
   const [draggingGroupIdx, setDraggingGroupIdx] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     idx: number;
     pos: 'before' | 'after';
   } | null>(null);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   // 初始化 hydration
   useEffect(() => {
@@ -155,13 +141,6 @@ export default function LogiFlowEditor(): React.ReactElement {
     if (!hydrated) return;
     saveActiveId(activeId);
   }, [activeId, hydrated]);
-
-  // 自动滚动聊天窗口
-  useEffect(() => {
-    if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-    }
-  }, [messages]);
 
   const activeSop: SopDoc = useMemo(
     () => sops.find((s) => s.id === activeId) ?? sops[0] ?? DEFAULT_SOPS[0],
@@ -684,122 +663,6 @@ export default function LogiFlowEditor(): React.ReactElement {
     (s) => s.id === selectedStepId,
   );
 
-  // ===== AI Agent =====
-  const sendAgentMessage = async (text?: string): Promise<void> => {
-    const content = (text ?? input).trim();
-    if (!content || streaming) return;
-    setInput('');
-    const userMsg: ChatMessage = {
-      id: 'u_' + Date.now(),
-      role: 'user',
-      content,
-    };
-    const assistantId = 'a_' + Date.now();
-    setMessages((prev) => [
-      ...prev,
-      userMsg,
-      { id: assistantId, role: 'assistant', content: '', pending: true },
-    ]);
-    setStreaming(true);
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const chatApi =
-        (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_CHAT_API_URL) ||
-        (typeof window !== 'undefined' && window.localStorage.getItem('logiflow.chatApi')) ||
-        '/api/chat';
-      const res = await fetch(chatApi, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [...messages, userMsg].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          sopSnapshot: JSON.stringify({
-            title: activeSop.title,
-            desc: activeSop.desc,
-            type: activeSop.type,
-            steps: activeSop.steps,
-          }).slice(0, 6000),
-        }),
-        signal: controller.signal,
-      });
-      if (!res.ok || !res.body) {
-        throw new Error('请求失败：' + res.status);
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let acc = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const raw of lines) {
-          const line = raw.trim();
-          if (!line.startsWith('data:')) continue;
-          const payload = line.slice(5).trim();
-          if (!payload) continue;
-          try {
-            const obj = JSON.parse(payload) as {
-              type: string;
-              content?: string;
-              error?: string;
-            };
-            if (obj.type === 'delta' && obj.content) {
-              acc += obj.content;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, content: acc, pending: true }
-                    : m,
-                ),
-              );
-            } else if (obj.type === 'done') {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, pending: false } : m,
-                ),
-              );
-            } else if (obj.type === 'error') {
-              throw new Error(obj.error || 'LLM 错误');
-            }
-          } catch (e) {
-            if (e instanceof Error && e.message.includes('LLM')) throw e;
-            // ignore parse error
-          }
-        }
-      }
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId ? { ...m, pending: false } : m,
-        ),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '未知错误';
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? {
-                ...m,
-                content:
-                  (m.content ? m.content + '\n\n' : '') +
-                  `⚠️ ${message}，请稍后重试。`,
-                pending: false,
-              }
-            : m,
-        ),
-      );
-    } finally {
-      setStreaming(false);
-      abortRef.current = null;
-    }
-  };
-
   if (!hydrated) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50 text-slate-500">
@@ -909,6 +772,17 @@ export default function LogiFlowEditor(): React.ReactElement {
                   <span className="text-xs text-slate-500">导入他人发来的单个 SOP</span>
                 </div>
               </DropdownMenuItem>
+              <div className="my-1 h-px bg-slate-200" />
+              <DropdownMenuItem
+                onSelect={() => setBatchExportOpen(true)}
+                className="gap-2 cursor-pointer"
+              >
+                <Layers className="h-4 w-4 text-indigo-600" />
+                <div className="flex flex-col">
+                  <span>批量合并导出…</span>
+                  <span className="text-xs text-slate-500">勾选多份 SOP 合成一份文档</span>
+                </div>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -979,22 +853,6 @@ export default function LogiFlowEditor(): React.ReactElement {
                   <p className="text-xs text-slate-500">{tpl.desc}</p>
                 </button>
               ))}
-            </div>
-          </div>
-
-          <div className="mt-auto p-4 border-t border-slate-200 shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-xs font-bold">
-                AI
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-slate-700">
-                  SOP 智能助手
-                </div>
-                <div className="text-xs text-slate-500">
-                  {streaming ? '思考中…' : '点击右下角悬浮按钮唤起'}
-                </div>
-              </div>
             </div>
           </div>
         </aside>
@@ -1355,141 +1213,12 @@ export default function LogiFlowEditor(): React.ReactElement {
         )}
       </div>
 
-      {/* Agent button & window */}
-      {!agentOpen && (
-        <button
-          onClick={() => setAgentOpen(true)}
-          className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-full shadow-lg shadow-blue-300/40 hover:shadow-xl hover:scale-105 transition flex items-center justify-center z-40 agent-pulse"
-          aria-label="打开 AI 助手"
-        >
-          <Sparkles className="w-6 h-6" />
-        </button>
-      )}
-
-      {agentOpen && (
-        <div className="fixed bottom-6 right-6 w-[380px] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden z-40" style={{ height: 540 }}>
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h4 className="text-white font-semibold text-sm">LogiAgent</h4>
-                <p className="text-blue-100 text-xs">物流 SOP 智能助手</p>
-              </div>
-            </div>
-            <button
-              onClick={() => setAgentOpen(false)}
-              className="text-white/80 hover:text-white transition"
-              aria-label="关闭"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <div
-            ref={chatScrollRef}
-            className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50"
-          >
-            {messages.length === 0 && (
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                  AI
-                </div>
-                <div className="bg-white rounded-2xl rounded-tl-none p-3 shadow-sm border border-slate-100 max-w-[85%]">
-                  <p className="text-sm text-slate-700">
-                    你好！我是你的物流 SOP 智能助手，可以帮你：
-                  </p>
-                  <ul className="text-sm text-slate-600 mt-2 space-y-1 list-disc list-inside">
-                    <li>优化现有流程步骤</li>
-                    <li>识别风险与合规缺口</li>
-                    <li>生成培训文档 / 检查清单</li>
-                    <li>对照行业规范给出量化建议</li>
-                  </ul>
-                  <p className="text-xs text-slate-500 mt-2">
-                    试试问我：&ldquo;如何优化入库质检环节？&rdquo;
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {messages.map((m) =>
-              m.role === 'user' ? (
-                <div key={m.id} className="flex gap-3 justify-end">
-                  <div className="bg-blue-600 text-white rounded-2xl rounded-tr-none p-3 shadow-sm max-w-[85%]">
-                    <p className="text-sm whitespace-pre-wrap break-words">
-                      {m.content}
-                    </p>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 text-xs font-bold shrink-0">
-                    我
-                  </div>
-                </div>
-              ) : (
-                <div key={m.id} className="flex gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    AI
-                  </div>
-                  <div className="bg-white rounded-2xl rounded-tl-none p-3 shadow-sm border border-slate-100 max-w-[85%]">
-                    {m.content ? (
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap break-words leading-relaxed">
-                        {m.content}
-                        {m.pending && (
-                          <span className="inline-block w-1.5 h-3.5 align-middle ml-0.5 bg-slate-400 animate-pulse" />
-                        )}
-                      </p>
-                    ) : (
-                      <div className="flex gap-1 py-1">
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full typing-dot" />
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full typing-dot" />
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full typing-dot" />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ),
-            )}
-          </div>
-
-          <div className="p-3 bg-white border-t border-slate-200 shrink-0">
-            <div className="flex gap-2 mb-2 overflow-x-auto scrollbar-none">
-              {QUICK_PROMPTS.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => sendAgentMessage(q)}
-                  disabled={streaming}
-                  className="whitespace-nowrap px-3 py-1 bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 rounded-full text-xs transition disabled:opacity-50"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void sendAgentMessage();
-                  }
-                }}
-                placeholder={streaming ? '思考中…' : '输入问题或指令…'}
-                disabled={streaming}
-                className="flex-1 bg-slate-100 border-0 rounded-xl text-sm focus-visible:ring-2 focus-visible:ring-blue-500"
-              />
-              <Button
-                onClick={() => void sendAgentMessage()}
-                disabled={streaming || !input.trim()}
-                size="icon"
-                className="rounded-xl bg-blue-600 hover:bg-blue-700"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <BatchExportDialog
+        open={batchExportOpen}
+        onOpenChange={setBatchExportOpen}
+        sops={sops}
+        activeId={activeId}
+      />
     </div>
   );
 }
@@ -2573,6 +2302,223 @@ function DecisionStepEditor(props: {
           <Trash2 className="w-4 h-4" />
           删除此判断节点
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// ===== 批量合并导出对话框 =====
+function BatchExportDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  sops: SopDoc[];
+  activeId: string;
+}): React.ReactElement | null {
+  const { open, onOpenChange, sops, activeId } = props;
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<false | 'pdf' | 'word' | 'html' | 'json'>(false);
+
+  useEffect(() => {
+    if (open) {
+      // 打开时默认勾选当前激活的 SOP
+      setSelectedIds(new Set([activeId]));
+    }
+  }, [open, activeId]);
+
+  if (!open) return null;
+
+  const toggle = (id: string): void => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = (): void => {
+    if (selectedIds.size === sops.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(sops.map((s) => s.id)));
+    }
+  };
+
+  // 保持导出顺序：按侧栏原始顺序
+  const selectedSops = sops.filter((s) => selectedIds.has(s.id));
+  const count = selectedSops.length;
+
+  const handleExport = async (kind: 'pdf' | 'word' | 'html' | 'json'): Promise<void> => {
+    if (count === 0) {
+      toast.error('请至少勾选一份 SOP');
+      return;
+    }
+    setBusy(kind);
+    try {
+      if (kind === 'json') {
+        const json = JSON.stringify(selectedSops, null, 2);
+        const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `SOP合并_${count}份_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success(`已合并导出 ${count} 份为 JSON`);
+      } else if (kind === 'word') {
+        downloadMultiWord(selectedSops);
+        toast.success(`已合并导出 ${count} 份为 Word`);
+      } else if (kind === 'html') {
+        downloadMultiHtml(selectedSops);
+        toast.success(`已合并导出 ${count} 份为 HTML`);
+      } else {
+        // pdf
+        await exportMultiPdf(selectedSops);
+        toast.success(`已合并导出 ${count} 份为 PDF`);
+      }
+      onOpenChange(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`导出失败：${msg}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const allSelected = selectedIds.size === sops.length && sops.length > 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      onClick={() => !busy && onOpenChange(false)}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col w-full max-w-2xl max-h-[85vh] overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="p-5 border-b border-slate-200 flex items-start justify-between shrink-0 bg-gradient-to-br from-indigo-50 to-white">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center text-white shrink-0">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-lg font-semibold text-slate-900">批量合并导出</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                勾选多份 SOP，按侧栏顺序合并为同一份文档；每份 SOP 之间自动分页。
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => !busy && onOpenChange(false)}
+            disabled={!!busy}
+            className="text-slate-400 hover:text-slate-600 transition p-1 -m-1 rounded disabled:opacity-40"
+            aria-label="关闭"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Toolbar */}
+        <div className="px-5 py-2.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/60 shrink-0">
+          <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
+            <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+            <span>{allSelected ? '取消全选' : '全选'}</span>
+          </label>
+          <div className="text-xs text-slate-500">
+            已选 <span className="font-semibold text-indigo-600">{count}</span> / {sops.length}
+          </div>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto p-3 min-h-[200px]">
+          {sops.length === 0 ? (
+            <div className="text-center text-slate-400 py-12 text-sm">还没有任何 SOP，先创建一份吧</div>
+          ) : (
+            <ul className="space-y-1.5">
+              {sops.map((sop, idx) => {
+                const checked = selectedIds.has(sop.id);
+                return (
+                  <li key={sop.id}>
+                    <label
+                      className={cn(
+                        'flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition',
+                        checked
+                          ? 'bg-indigo-50/70 border-indigo-200'
+                          : 'bg-white border-slate-200 hover:bg-slate-50',
+                      )}
+                    >
+                      <Checkbox checked={checked} onCheckedChange={() => toggle(sop.id)} />
+                      <span
+                        className={cn(
+                          'w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-semibold shrink-0',
+                          checked ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500',
+                        )}
+                      >
+                        {idx + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-800 truncate">{sop.title}</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                          <span>{sop.steps.length} 步</span>
+                          <span className="text-slate-300">·</span>
+                          <span>{sop.version}</span>
+                          <span className="text-slate-300">·</span>
+                          <span className="truncate">{sop.owner}</span>
+                        </div>
+                      </div>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div className="px-5 py-3 border-t border-slate-200 bg-white shrink-0 flex flex-wrap gap-2 justify-end">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={!!busy}
+          >
+            取消
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleExport('json')}
+            disabled={!!busy || count === 0}
+            className="gap-1.5"
+          >
+            <FileDown className="w-4 h-4 text-emerald-600" />
+            合并为 JSON
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleExport('html')}
+            disabled={!!busy || count === 0}
+            className="gap-1.5"
+          >
+            <FileText className="w-4 h-4 text-blue-600" />
+            {busy === 'html' ? '导出中…' : '合并为 HTML'}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => void handleExport('word')}
+            disabled={!!busy || count === 0}
+            className="gap-1.5"
+          >
+            <FileType className="w-4 h-4 text-sky-600" />
+            {busy === 'word' ? '导出中…' : '合并为 Word'}
+          </Button>
+          <Button
+            onClick={() => void handleExport('pdf')}
+            disabled={!!busy || count === 0}
+            className="gap-1.5 bg-indigo-600 hover:bg-indigo-700"
+          >
+            <Printer className="w-4 h-4" />
+            {busy === 'pdf' ? '导出中…' : '合并为 PDF'}
+          </Button>
+        </div>
       </div>
     </div>
   );

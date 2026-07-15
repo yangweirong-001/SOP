@@ -409,3 +409,53 @@ export function downloadHtml(sop: SopDoc): void {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+export function downloadMultiHtml(sops: SopDoc[], filename?: string): void {
+  if (typeof window === 'undefined' || sops.length === 0) return;
+  if (sops.length === 1) {
+    downloadHtml(sops[0]);
+    return;
+  }
+  const parts = sops.map((sop) => {
+    const full = buildExportHtml(sop);
+    // 只取 <body>...</body> 中的主容器 <div id="pdf-root"> 或 <main>
+    const m = full.match(/<body[^>]*>([\s\S]*?)<\/body>/);
+    return m ? m[1] : full;
+  });
+  // 用第一份的 <head> 作为模板（含 tailwind CDN 等）
+  const firstFull = buildExportHtml(sops[0]);
+  const headMatch = firstFull.match(/<head[^>]*>([\s\S]*?)<\/head>/);
+  const head = headMatch ? headMatch[1] : '';
+  const combinedTitle = `SOP 合并文档 (${sops.length} 份)`;
+  const combinedBody = parts
+    .map(
+      (bodyInner, i) => `
+<section class="multi-sop-section" data-sop-index="${i}" style="${i > 0 ? 'page-break-before:always;' : ''}">
+  ${bodyInner}
+</section>`,
+    )
+    .join('\n<hr class="my-12 border-t-4 border-double border-slate-300" />\n');
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+${head.replace(/<title>[^<]*<\/title>/, `<title>${combinedTitle}</title>`)}
+</head>
+<body>
+  <div class="max-w-5xl mx-auto p-6">
+    <header class="mb-8 pb-6 border-b-2 border-slate-200">
+      <h1 class="text-3xl font-bold text-slate-900">${combinedTitle}</h1>
+      <p class="mt-2 text-slate-600">本文档包含 ${sops.length} 份 SOP：${sops.map((s) => escapeHtml(s.title)).join('、')}</p>
+      <p class="mt-1 text-xs text-slate-400">导出时间：${new Date().toLocaleString('zh-CN')}</p>
+    </header>
+    ${combinedBody}
+  </div>
+</body>
+</html>`;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || `SOP合并_${sops.length}份_${Date.now()}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
+}

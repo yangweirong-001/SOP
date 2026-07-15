@@ -1,7 +1,7 @@
 'use client';
 
 import type { SopDoc } from './types';
-import { buildPrintHtml } from './export-word';
+import { buildPrintHtml, buildMultiPrintHtml } from './export-word';
 
 /**
  * PDF 一键下载（html2canvas + jsPDF + 单页超长 PDF + 图片高清叠加）
@@ -26,14 +26,28 @@ import { buildPrintHtml } from './export-word';
  */
 export async function exportPdf(sop: SopDoc): Promise<void> {
   if (typeof window === 'undefined') return;
+  const html = buildPrintHtml(sop);
+  return exportPdfFromHtml(html, sanitizeFilename(sop.title));
+}
+
+export async function exportMultiPdf(sops: SopDoc[], filename?: string): Promise<void> {
+  if (typeof window === 'undefined' || sops.length === 0) return;
+  if (sops.length === 1) {
+    return exportPdf(sops[0]);
+  }
+  const html = buildMultiPrintHtml(sops);
+  const base = filename || `SOP合并_${sops.length}份_${Date.now()}`;
+  return exportPdfFromHtml(html, sanitizeFilename(base));
+}
+
+async function exportPdfFromHtml(html: string, baseFilename: string): Promise<void> {
+  if (typeof window === 'undefined') return;
 
   // 按需加载依赖
   const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
     import('html2canvas'),
     import('jspdf'),
   ]);
-
-  const html = buildPrintHtml(sop);
 
   // 让 iframe 内容宽度对齐 Word A4 2cm 边距：210mm - 40mm = 170mm ≈ 642px @96dpi。
   // buildPrintHtml body 有 40px×44px 内边距，实际内容宽 ≈ 720-88 = 632px。
@@ -194,7 +208,7 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
       );
       // 再把每张图片以原图分辨率独立嵌入 PDF，覆盖到底图对应区域 → 放大不糊
       overlayImagesOnPdf(pdf, 0, 0, imgHeight);
-      pdf.save(`${sanitizeFilename(sop.title)}.pdf`);
+      pdf.save(`${baseFilename}.pdf`);
     } else {
       // ⚠️ 兜底：内容超长，降级为 A4 分页（长图切片 + 图片高清叠加）
       const pdf = new jsPDF({
@@ -237,7 +251,7 @@ export async function exportPdf(sop: SopDoc): Promise<void> {
         overlayImagesOnPdf(pdf, pageIndex, pageIndex * contentHeight, contentHeight);
         heightLeft -= contentHeight;
       }
-      pdf.save(`${sanitizeFilename(sop.title)}.pdf`);
+      pdf.save(`${baseFilename}.pdf`);
     }
   } finally {
     if (iframe.parentNode) {

@@ -337,6 +337,92 @@ export function downloadWord(sop: SopDoc): void {
   URL.revokeObjectURL(url);
 }
 
+function buildMultiWordHtml(sops: SopDoc[]): string {
+  const title = `SOP 合并文档 (${sops.length} 份)`;
+  const sections = sops
+    .map((sop, i) => {
+      const stepsHtml = buildStepsHtml(sop);
+      const tocHtml = buildTocHtml(sop);
+      const pageBreak = i > 0
+        ? '<br clear=all style="mso-special-character:line-break;page-break-before:always" />'
+        : '';
+      return `${pageBreak}
+  <h1>${escapeHtml(sop.title)}</h1>
+  <p style="color:#475569;">${escapeHtml(sop.desc)}</p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:16px;">
+    <tr>
+      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;width:25%;">版本</td>
+      <td style="padding:6px;border:1px solid #cbd5e1;width:25%;">${escapeHtml(sop.version)}</td>
+      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;width:25%;">负责人</td>
+      <td style="padding:6px;border:1px solid #cbd5e1;width:25%;">${escapeHtml(sop.owner)}</td>
+    </tr>
+    <tr>
+      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">预计耗时</td>
+      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.duration)}</td>
+      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">适用场景</td>
+      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.scenario)}</td>
+    </tr>
+    <tr>
+      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">状态</td>
+      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.status)}</td>
+      <td style="padding:6px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">更新日期</td>
+      <td style="padding:6px;border:1px solid #cbd5e1;">${escapeHtml(sop.updatedAt)}</td>
+    </tr>
+  </table>
+  ${tocHtml}
+  ${stepsHtml}`;
+    })
+    .join('\n');
+  return `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="UTF-8" />
+<meta name="ProgId" content="Word.Document" />
+<meta name="Generator" content="Microsoft Word 15" />
+<title>${escapeHtml(title)}</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotPromptForConvert/></w:WordDocument></xml><![endif]-->
+<style>
+  @page Section1 { size: 21cm 29.7cm; margin: 2cm 2cm 2cm 2cm; mso-page-orientation: portrait; }
+  div.Section1 { page: Section1; }
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #0f172a; line-height: 1.6; }
+  h1 { color: #1e3a8a; border-bottom: 3px solid #2563eb; padding-bottom: 8px; }
+  table { margin: 8px 0; width: 100%; }
+  img { max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div class="Section1">
+  <h1 style="text-align:center;color:#0f172a;border:none;">${escapeHtml(title)}</h1>
+  <p style="text-align:center;color:#64748b;font-size:12px;">
+    共包含 ${sops.length} 份 SOP · 导出时间：${new Date().toLocaleString('zh-CN')}
+  </p>
+  ${sections}
+  <p style="margin-top:32px;color:#94a3b8;font-size:12px;text-align:center;">
+    由 LogiFlow SOP 系统生成
+  </p>
+</div>
+</body>
+</html>`;
+}
+
+export function downloadMultiWord(sops: SopDoc[], filename?: string): void {
+  if (typeof window === 'undefined' || sops.length === 0) return;
+  if (sops.length === 1) {
+    downloadWord(sops[0]);
+    return;
+  }
+  const html = buildMultiWordHtml(sops);
+  const blob = new Blob(['\ufeff', html], {
+    type: 'application/msword;charset=utf-8',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || `SOP合并_${sops.length}份_${Date.now()}.doc`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function buildPrintHtml(sop: SopDoc): string {
   const stepsHtml = buildStepsHtml(sop);
   const tocHtml = buildTocHtml(sop);
@@ -431,3 +517,88 @@ export function buildPrintHtml(sop: SopDoc): string {
 
 // 真·PDF 导出已迁移到 ./export-pdf.ts (html2canvas + jsPDF)。
 // 保留 buildPrintHtml 供 PDF 复用；不再提供基于 window.print 的 exportPdf。
+
+export function buildMultiPrintHtml(sops: SopDoc[]): string {
+  const title = `SOP 合并文档 (${sops.length} 份)`;
+  const sections = sops
+    .map((sop, i) => {
+      const stepsHtml = buildStepsHtml(sop);
+      const tocHtml = buildTocHtml(sop);
+      const divider = i > 0
+        ? '<div style="page-break-before:always;break-before:page;height:0;"></div>'
+        : '';
+      return `${divider}
+  <section class="sop-section">
+    <h1>${escapeHtml(sop.title)}</h1>
+    <p class="meta">${escapeHtml(sop.desc)}</p>
+    <table style="font-size:13.5px;margin-top:12px;">
+      <tr>
+        <td style="padding:8px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;width:18%;">版本</td>
+        <td style="padding:8px;border:1px solid #cbd5e1;width:32%;">${escapeHtml(sop.version)}</td>
+        <td style="padding:8px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;width:18%;">负责人</td>
+        <td style="padding:8px;border:1px solid #cbd5e1;width:32%;">${escapeHtml(sop.owner)}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">预计耗时</td>
+        <td style="padding:8px;border:1px solid #cbd5e1;">${escapeHtml(sop.duration)}</td>
+        <td style="padding:8px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">适用场景</td>
+        <td style="padding:8px;border:1px solid #cbd5e1;">${escapeHtml(sop.scenario)}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">状态</td>
+        <td style="padding:8px;border:1px solid #cbd5e1;">${escapeHtml(sop.status)}</td>
+        <td style="padding:8px;background:#f1f5f9;border:1px solid #cbd5e1;font-weight:bold;">更新日期</td>
+        <td style="padding:8px;border:1px solid #cbd5e1;">${escapeHtml(sop.updatedAt)}</td>
+      </tr>
+    </table>
+    ${tocHtml}
+    ${stepsHtml}
+  </section>`;
+    })
+    .join('\n');
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>${escapeHtml(title)}</title>
+<style>
+  @page { size: A4; margin: 20mm 20mm; }
+  * { box-sizing: border-box; }
+  html, body { background: #fff; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    color: #0f172a;
+    line-height: 1.6;
+    font-size: 14.5px;
+    margin: 0;
+    padding: 40px 44px;
+  }
+  h1 { color: #1e3a8a; border-bottom: 3px solid #2563eb; padding-bottom: 10px; margin: 0 0 12px; font-size: 26px; font-weight: 700; letter-spacing: 0.5px; }
+  h2 { font-size: 17px; margin-top: 22px; margin-bottom: 8px; page-break-after: avoid; font-weight: 700; }
+  p { margin: 6px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; page-break-inside: avoid; font-size: 14px; }
+  td { vertical-align: top; word-break: break-word; padding: 8px; }
+  img { max-width: 100%; height: auto; }
+  .meta { color: #475569; margin-bottom: 14px; font-size: 14px; }
+  .sop-section { margin-bottom: 32px; }
+  .cover { text-align: center; padding: 60px 40px 40px; border-bottom: 2px solid #cbd5e1; margin-bottom: 40px; }
+  .cover h1 { border: none; font-size: 32px; color: #0f172a; margin-bottom: 20px; }
+  .cover .list { display: inline-block; text-align: left; margin-top: 24px; }
+  .cover .list li { margin: 6px 0; color: #475569; }
+</style>
+</head>
+<body>
+  <div class="cover">
+    <h1>${escapeHtml(title)}</h1>
+    <p style="color:#64748b;font-size:14px;">共包含 ${sops.length} 份 SOP · 导出时间：${new Date().toLocaleString('zh-CN')}</p>
+    <ol class="list">
+      ${sops.map((s) => `<li>${escapeHtml(s.title)}<span style="color:#94a3b8;margin-left:8px;font-size:12px;">${escapeHtml(s.version)} · ${escapeHtml(s.owner)}</span></li>`).join('')}
+    </ol>
+  </div>
+  ${sections}
+  <p style="margin-top:28px;color:#94a3b8;font-size:12px;text-align:center;">
+    由 LogiFlow SOP 系统生成
+  </p>
+</body>
+</html>`;
+}
